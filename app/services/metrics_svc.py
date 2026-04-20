@@ -111,6 +111,17 @@ def calculate_user_metrics(db: Session, user_id: int,
         for t in difficult_list
     ]
 
+    status_rows = db.query(
+        Task.column_status,
+        func.count(Task.id).label('count')
+    ).filter(
+        Task.owner_id == user_id,
+        Task.deleted_at.is_(None),
+        func.date(Task.created_at) >= start_date,
+        func.date(Task.created_at) <= end_date,
+    ).group_by(Task.column_status).all()
+    tasks_by_status = {row.column_status: int(row.count) for row in status_rows}
+
     return {
         "totalTasks": total_tasks,
         "completedTasks": completed_tasks,
@@ -120,6 +131,7 @@ def calculate_user_metrics(db: Session, user_id: int,
         "slaAvgDays": sla_days,
         "avgDifficulty": round(float(avg_difficulty), 1),
         "tasksByMonth": tasks_by_month,
+        "tasksByStatus": tasks_by_status,
         "deepWorkByDay": deep_work_by_day,
         "predictabilityByTask": predictability,
         "difficultTasks": difficult_tasks,
@@ -169,6 +181,17 @@ def calculate_team_metrics(db: Session, team_id: int,
     hours_worked = round(total_seconds / 3600, 1)
     avg_productivity = round(completed_tasks / hours_worked, 2) if hours_worked > 0 else 0
 
+    team_status_rows = db.query(
+        Task.column_status,
+        func.count(Task.id).label('count')
+    ).filter(
+        Task.owner_id.in_(member_ids),
+        Task.deleted_at.is_(None),
+        func.date(Task.created_at) >= start_date,
+        func.date(Task.created_at) <= end_date,
+    ).group_by(Task.column_status).all()
+    tasks_by_status = {row.column_status: int(row.count) for row in team_status_rows}
+
     member_metrics = []
     for member in members:
         m = calculate_user_metrics(db, member.id, start_date, end_date)
@@ -183,6 +206,7 @@ def calculate_team_metrics(db: Session, team_id: int,
             "iel": m["iel"],
             "slaAvgDays": m["slaAvgDays"],
             "tasksByMonth": m["tasksByMonth"],
+            "tasksByStatus": m["tasksByStatus"],
             "deepWorkByDay": m["deepWorkByDay"],
         })
 
@@ -196,5 +220,6 @@ def calculate_team_metrics(db: Session, team_id: int,
         "completionRate": round(completion_rate, 1),
         "hoursWorked": hours_worked,
         "avgProductivity": avg_productivity,
+        "tasksByStatus": tasks_by_status,
         "memberMetrics": member_metrics,
     }
