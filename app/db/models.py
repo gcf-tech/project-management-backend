@@ -1,7 +1,7 @@
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean,
-    Enum, Date, DateTime, DECIMAL, ForeignKey, CheckConstraint
+    Enum, Date, DateTime, DECIMAL, ForeignKey, CheckConstraint, Time, Index
 )
 from sqlalchemy.orm import relationship
 from app.db.database import Base
@@ -196,4 +196,55 @@ class SkillEndorsement(Base):
 
     __table_args__ = (
         CheckConstraint("score BETWEEN 1 AND 10", name="chk_endorsement_score"),
+    )
+
+
+class UserPreferences(Base):
+    __tablename__ = "user_preferences"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    week_start_day = Column(Integer, default=1, nullable=False)
+    week_end_day = Column(Integer, default=5, nullable=False)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow)
+
+    user = relationship("User")
+
+
+class WeeklyBlock(Base):
+    __tablename__ = "weekly_blocks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    week_start = Column(Date, nullable=False)
+    day_of_week = Column(Integer, nullable=False)
+    block_type = Column(Enum("task", "activity", "personal"), nullable=False)
+    task_id = Column(String(50), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    activity_id = Column(String(50), ForeignKey("activities.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String(200), nullable=True)
+    color = Column(String(20), nullable=True)
+    start_time = Column(Time, nullable=False)
+    end_time = Column(Time, nullable=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, onupdate=datetime.utcnow)
+
+    user = relationship("User")
+    task = relationship("Task")
+    activity = relationship("Activity")
+
+    __table_args__ = (
+        CheckConstraint("end_time > start_time", name="chk_weekly_block_end_after_start"),
+        CheckConstraint(
+            "(block_type != 'task' OR task_id IS NOT NULL)",
+            name="chk_weekly_block_task_id",
+        ),
+        CheckConstraint(
+            "(block_type != 'activity' OR activity_id IS NOT NULL)",
+            name="chk_weekly_block_activity_id",
+        ),
+        CheckConstraint(
+            "(block_type != 'personal' OR title IS NOT NULL)",
+            name="chk_weekly_block_personal_title",
+        ),
+        Index("idx_weekly_blocks_user_week", "user_id", "week_start"),
     )

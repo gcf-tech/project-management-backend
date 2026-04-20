@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import auth, tasks, metrics, teams
+from app.api.v1 import auth, tasks, metrics, teams, weekly
 
 
 @asynccontextmanager
@@ -35,6 +35,7 @@ app.include_router(auth.router,    prefix="/auth")
 app.include_router(tasks.router,   prefix="/api/proyectos")
 app.include_router(metrics.router, prefix="/api/dashboard")
 app.include_router(teams.router,   prefix="/api")
+app.include_router(weekly.router,  prefix="/api/weekly")
 
 
 @app.get("/health")
