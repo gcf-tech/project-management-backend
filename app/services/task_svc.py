@@ -1,6 +1,7 @@
 from datetime import datetime, date
 from typing import Optional
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from app.db.models import Task, Activity, Subtask, TimeLog, Observation, User
 
 
@@ -30,7 +31,7 @@ def serialize_task(task: Task) -> dict:
             for o in task.observations
         ],
         "timeLog": [
-            {"date": t.log_date.isoformat(), "seconds": t.seconds}
+            {"id": t.id, "date": t.log_date.isoformat(), "seconds": t.seconds}
             for t in task.time_logs
         ],
         "createdAt": task.created_at.isoformat() if task.created_at else None,
@@ -59,12 +60,29 @@ def serialize_activity(activity: Activity) -> dict:
             for o in activity.observations
         ],
         "timeLog": [
-            {"date": t.log_date.isoformat(), "seconds": t.seconds}
+            {"id": t.id, "date": t.log_date.isoformat(), "seconds": t.seconds}
             for t in activity.time_logs
         ],
         "createdAt": activity.created_at.isoformat() if activity.created_at else None,
         "updatedAt": activity.updated_at.isoformat() if activity.updated_at else None,
     }
+
+def _recalc_time_spent(db: Session, task_id: Optional[str] = None, activity_id: Optional[str] = None):
+    if task_id:
+        task = db.query(Task).with_for_update().filter(Task.id == task_id).first()
+        if task:
+            total_seconds = db.query(func.sum(TimeLog.seconds)).filter(TimeLog.task_id == task_id).scalar() or 0
+            task.time_spent = int(total_seconds)
+            task.updated_at = datetime.utcnow()
+            return task
+    elif activity_id:
+        activity = db.query(Activity).with_for_update().filter(Activity.id == activity_id).first()
+        if activity:
+            total_seconds = db.query(func.sum(TimeLog.seconds)).filter(TimeLog.activity_id == activity_id).scalar() or 0
+            activity.time_spent = int(total_seconds)
+            activity.updated_at = datetime.utcnow()
+            return activity
+    return None
 
 
 def record_time_on_task(
@@ -76,10 +94,32 @@ def record_time_on_task(
     subtask_id: Optional[str],
     feedback: Optional[dict],
 ) -> Task:
+    today = date.today()
+    time_log = db.query(TimeLog).filter(
+        TimeLog.task_id == task.id,
+        TimeLog.log_date == today,
+        TimeLog.user_id == user_id,
+    ).first()
+
     if absolute_time is not None:
-        task.time_spent = absolute_time
+        if time_log:
+            diff = absolute_time - task.time_spent
+            time_log.seconds = max(0, time_log.seconds + diff)
+        else:
+            db.add(TimeLog(user_id=user_id, task_id=task.id, log_date=today, seconds=absolute_time))
     else:
-        task.time_spent += time_spent
+        if time_log:
+            time_log.seconds += time_spent
+        else:
+            db.add(TimeLog(
+                user_id=user_id,
+                task_id=task.id,
+                log_date=today,
+                seconds=time_spent,
+            ))
+
+    db.flush()
+    task = _recalc_time_spent(db, task_id=task.id)
 
     if subtask_id and subtask_id != "none":
         subtask = db.query(Subtask).filter(
@@ -88,30 +128,12 @@ def record_time_on_task(
         if subtask:
             subtask.time_spent += time_spent
 
-    today = date.today()
-    time_log = db.query(TimeLog).filter(
-        TimeLog.task_id == task.id,
-        TimeLog.log_date == today,
-        TimeLog.user_id == user_id,
-    ).first()
-
-    if time_log:
-        time_log.seconds += time_spent
-    else:
-        db.add(TimeLog(
-            user_id=user_id,
-            task_id=task.id,
-            log_date=today,
-            seconds=time_spent,
-        ))
-
     if feedback:
         if "progress" in feedback:
             task.progress = feedback["progress"]
         if feedback.get("observation"):
             db.add(Observation(task_id=task.id, user_id=user_id, text=feedback["observation"]))
 
-    task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
     return task
@@ -125,11 +147,6 @@ def record_time_on_activity(
     absolute_time: Optional[int],
     feedback: Optional[dict],
 ) -> Activity:
-    if absolute_time is not None:
-        activity.time_spent = absolute_time
-    else:
-        activity.time_spent += time_spent
-
     today = date.today()
     time_log = db.query(TimeLog).filter(
         TimeLog.activity_id == activity.id,
@@ -137,15 +154,25 @@ def record_time_on_activity(
         TimeLog.user_id == user_id,
     ).first()
 
-    if time_log:
-        time_log.seconds += time_spent
+    if absolute_time is not None:
+        if time_log:
+            diff = absolute_time - activity.time_spent
+            time_log.seconds = max(0, time_log.seconds + diff)
+        else:
+            db.add(TimeLog(user_id=user_id, activity_id=activity.id, log_date=today, seconds=absolute_time))
     else:
-        db.add(TimeLog(
-            user_id=user_id,
-            activity_id=activity.id,
-            log_date=today,
-            seconds=time_spent,
-        ))
+        if time_log:
+            time_log.seconds += time_spent
+        else:
+            db.add(TimeLog(
+                user_id=user_id,
+                activity_id=activity.id,
+                log_date=today,
+                seconds=time_spent,
+            ))
+
+    db.flush()
+    activity = _recalc_time_spent(db, activity_id=activity.id)
 
     if feedback:
         if "progress" in feedback:
@@ -153,7 +180,6 @@ def record_time_on_activity(
         if feedback.get("observation"):
             db.add(Observation(activity_id=activity.id, user_id=user_id, text=feedback["observation"]))
 
-    activity.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(activity)
     return activity

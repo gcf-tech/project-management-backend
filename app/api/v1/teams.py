@@ -1,3 +1,4 @@
+import httpx
 from datetime import datetime
 from typing import Optional, Annotated, List
 from fastapi import APIRouter, HTTPException, Header, Depends
@@ -15,12 +16,22 @@ router = APIRouter()
 
 @router.get("/deck/boards")
 async def get_deck_boards(authorization: Annotated[str, Header()]):
-    return await fetch_deck_boards(authorization)
+    try:
+        return await fetch_deck_boards(authorization)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(status_code=401, detail="Token expired or invalid")
+        raise HTTPException(status_code=502, detail="Deck service unavailable")
 
 
 @router.get("/deck/boards/{board_id}/cards")
 async def get_deck_cards(board_id: int, authorization: Annotated[str, Header()]):
-    return await fetch_deck_cards(board_id, authorization)
+    try:
+        return await fetch_deck_cards(board_id, authorization)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(status_code=401, detail="Token expired or invalid")
+        raise HTTPException(status_code=502, detail="Deck service unavailable")
 
 
 # ── Skills ────────────────────────────────────────────────────────────────────

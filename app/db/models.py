@@ -127,12 +127,18 @@ class TimeLog(Base):
     activity_id = Column(String(50), ForeignKey("activities.id", ondelete="CASCADE"), nullable=True)
     log_date = Column(Date, nullable=False)
     seconds = Column(Integer, default=0)
+    client_op_id = Column(String(64), unique=True, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User")
     task = relationship("Task", back_populates="time_logs")
     activity = relationship("Activity", back_populates="time_logs")
+
+    __table_args__ = (
+        Index("uq_time_logs_user_task_date", "user_id", "task_id", "log_date", unique=True),
+        Index("uq_time_logs_user_activity_date", "user_id", "activity_id", "log_date", unique=True),
+    )
 
 
 class Observation(Base):

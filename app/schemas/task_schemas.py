@@ -79,3 +79,12 @@ class TimeRecord(BaseModel):
 
 class ColumnUpdate(BaseModel):
     column: str
+
+class TimeLogCreate(BaseModel):
+    logDate: str
+    seconds: int
+    clientOpId: Optional[str] = None
+
+class TimeLogPatch(BaseModel):
+    seconds: int
+    clientOpId: Optional[str] = None

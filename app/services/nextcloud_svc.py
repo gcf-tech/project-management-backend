@@ -70,10 +70,18 @@ async def fetch_deck_boards(authorization: str) -> list:
                 "Accept": "application/json",
             },
         )
+        if response.status_code == 401:
+            raise httpx.HTTPStatusError("Unauthorized", request=response.request, response=response)
         if response.status_code != 200:
             return []
         boards = response.json()
-        return [{"id": b["id"], "title": b["title"]} for b in boards]
+        if not isinstance(boards, list):
+            return []
+        return [
+            {"id": b.get("id"), "title": b.get("title", "Untitled")}
+            for b in boards
+            if not b.get("archived", False) and b.get("id") is not None
+        ]
 
 
 async def fetch_deck_cards(board_id: int, authorization: str) -> list:
@@ -86,21 +94,31 @@ async def fetch_deck_cards(board_id: int, authorization: str) -> list:
                 "Accept": "application/json",
             },
         )
+        if response.status_code == 401:
+            raise httpx.HTTPStatusError("Unauthorized", request=response.request, response=response)
         if response.status_code in [403, 404]:
             return []
         if response.status_code != 200:
             return []
 
         stacks = response.json()
+        if not isinstance(stacks, list):
+            return []
         cards = []
         for stack in stacks:
-            for card in stack.get("cards", []):
+            for card in stack.get("cards") or []:
+                card_id = card.get("id")
+                if card_id is None:
+                    continue
                 cards.append({
-                    "id": card["id"],
+                    "id": card_id,
                     "title": card.get("title", "Untitled"),
                     "description": card.get("description", ""),
                     "duedate": card.get("duedate"),
-                    "labels": [l["title"] for l in card.get("labels", [])],
+                    "labels": [
+                        lbl.get("title", "")
+                        for lbl in (card.get("labels") or [])
+                    ],
                     "stack": stack.get("title", ""),
                 })
         return cards
