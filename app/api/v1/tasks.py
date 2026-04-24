@@ -639,6 +639,9 @@ async def patch_time_log(
 
     time_log = db.query(TimeLog).filter(TimeLog.id == log_id).first()
     if not time_log:
+        # Idempotent: row already deleted by a prior seconds=0 call with the same clientOpId
+        if data.seconds == 0 and data.clientOpId:
+            return {"success": True}
         raise HTTPException(status_code=404, detail="Time log not found")
 
     if time_log.user_id != user.id and user.role != "admin":

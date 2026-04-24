@@ -1,6 +1,7 @@
 import httpx
 from fastapi import APIRouter, HTTPException, Header, Depends
 from typing import Annotated
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.core.config import NC_URL, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET
 from app.core.security import get_nc_user_info
@@ -10,6 +11,8 @@ from app.api.dependencies import get_db
 
 router = APIRouter()
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 @router.post("/callback")
 async def oauth_callback(body: OAuthCallback):
@@ -30,10 +33,46 @@ async def oauth_callback(body: OAuthCallback):
         if response.status_code != 200:
             raise HTTPException(
                 status_code=response.status_code,
-                detail=f"OAuth token exchange failed: {response.text}"
+                detail=f"OAuth token exchange failed: {response.text}",
             )
-        return response.json()
+        payload = response.json()
+        return {
+            "access_token": payload.get("access_token"),
+            "refresh_token": payload.get("refresh_token"),
+            "expires_in": payload.get("expires_in", 3600),
+            "token_type": payload.get("token_type", "Bearer"),
+        }
 
+@router.post("/refresh")
+async def oauth_refresh(body: RefreshRequest):
+    """Renueva access_token usando refresh_token. No requiere Authorization header."""
+    if not OAUTH_CLIENT_ID or not OAUTH_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="OAuth not configured")
+    if not body.refresh_token:
+        raise HTTPException(status_code=400, detail="refresh_token required")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            f"{NC_URL}/index.php/apps/oauth2/api/v1/token",
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": body.refresh_token,
+                "client_id": OAUTH_CLIENT_ID,
+                "client_secret": OAUTH_CLIENT_SECRET,
+            },
+        )
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=401,
+                detail=f"Refresh failed: {response.text}",
+            )
+        payload = response.json()
+        return {
+            "access_token": payload.get("access_token"),
+            "refresh_token": payload.get("refresh_token"),
+            "expires_in": payload.get("expires_in", 3600),
+            "token_type": payload.get("token_type", "Bearer"),
+        }
 
 @router.get("/me")
 async def get_me(

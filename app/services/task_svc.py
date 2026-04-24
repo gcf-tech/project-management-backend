@@ -104,7 +104,11 @@ def record_time_on_task(
     if absolute_time is not None:
         if time_log:
             diff = absolute_time - task.time_spent
-            time_log.seconds = max(0, time_log.seconds + diff)
+            new_seconds = time_log.seconds + diff
+            if new_seconds <= 0:
+                db.delete(time_log)
+            else:
+                time_log.seconds = new_seconds
         else:
             db.add(TimeLog(user_id=user_id, task_id=task.id, log_date=today, seconds=absolute_time))
     else:
@@ -157,7 +161,11 @@ def record_time_on_activity(
     if absolute_time is not None:
         if time_log:
             diff = absolute_time - activity.time_spent
-            time_log.seconds = max(0, time_log.seconds + diff)
+            new_seconds = time_log.seconds + diff
+            if new_seconds <= 0:
+                db.delete(time_log)
+            else:
+                time_log.seconds = new_seconds
         else:
             db.add(TimeLog(user_id=user_id, activity_id=activity.id, log_date=today, seconds=absolute_time))
     else:
