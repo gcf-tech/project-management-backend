@@ -1,5 +1,18 @@
+from enum import Enum as PyEnum
 from typing import Optional, List
 from pydantic import BaseModel, Field
+
+
+class ActivityType(str, PyEnum):
+    meeting = "meeting"
+    email = "email"
+    planning = "planning"
+    other = "other"
+
+
+class TaskType(str, PyEnum):
+    project = "project"
+    task = "task"
 
 
 class SubtaskCreate(BaseModel):
@@ -13,7 +26,7 @@ class TaskCreate(BaseModel):
     title: str
     description: Optional[str] = ""
     column: str = "actively-working"
-    type: str = "project"
+    type: TaskType = TaskType.project
     priority: Optional[str] = "medium"
     startDate: Optional[str] = None
     deadline: Optional[str] = None
@@ -30,7 +43,7 @@ class TaskPatch(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     column: Optional[str] = None
-    type: Optional[str] = None
+    type: Optional[TaskType] = None
     priority: Optional[str] = None
     startDate: Optional[str] = None
     deadline: Optional[str] = None
@@ -49,7 +62,7 @@ class TaskPatch(BaseModel):
 class ActivityCreate(BaseModel):
     title: str
     description: Optional[str] = ""
-    type: str = "other"
+    type: ActivityType = ActivityType.other
     priority: Optional[str] = "medium"
     startDate: Optional[str] = None
     deadline: Optional[str] = None
@@ -59,7 +72,7 @@ class ActivityCreate(BaseModel):
 class ActivityPatch(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    type: Optional[str] = None
+    type: Optional[ActivityType] = None
     priority: Optional[str] = None
     startDate: Optional[str] = None
     deadline: Optional[str] = None

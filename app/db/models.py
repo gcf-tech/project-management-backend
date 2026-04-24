@@ -87,7 +87,7 @@ class Activity(Base):
     description = Column(Text, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     assigned_to = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    type = Column(Enum("meeting", "training", "support", "review", "planning", "other"), default="other")
+    type = Column(String(50), nullable=False, default="other")
     priority = Column(Enum("low", "medium", "high", "urgent"), nullable=True)
     start_date = Column(Date, nullable=True)
     deadline = Column(Date, nullable=True)

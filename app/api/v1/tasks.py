@@ -1,8 +1,12 @@
+import logging
 from datetime import datetime, date
 from typing import Optional, Annotated, List
 from fastapi import APIRouter, HTTPException, Header, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
+from sqlalchemy.exc import IntegrityError, DataError
+
+logger = logging.getLogger(__name__)
 
 from app.api.dependencies import get_db, get_current_user
 from app.db.models import Task, Activity, Subtask, TimeLog, Observation, User
@@ -377,9 +381,17 @@ async def create_activity(
         type=data.type, priority=data.priority,
         start_date=parse_date(data.startDate), deadline=parse_date(data.deadline),
     )
-    db.add(activity)
-    db.commit()
-    db.refresh(activity)
+    try:
+        db.add(activity)
+        db.commit()
+        db.refresh(activity)
+    except (IntegrityError, DataError) as exc:
+        db.rollback()
+        logger.error(
+            "DB error creating activity | user_id=%s payload=%s error=%s",
+            user.id, data.model_dump(), str(exc.orig),
+        )
+        raise HTTPException(status_code=422, detail=f"Invalid activity data: {exc.orig}")
     return {"success": True, "activity": serialize_activity(activity)}
 
 
@@ -425,8 +437,16 @@ async def patch_activity(
             setattr(activity, field, value)
 
     activity.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(activity)
+    try:
+        db.commit()
+        db.refresh(activity)
+    except (IntegrityError, DataError) as exc:
+        db.rollback()
+        logger.error(
+            "DB error patching activity | activity_id=%s payload=%s error=%s",
+            activity_id, data.model_dump(exclude_unset=True), str(exc.orig),
+        )
+        raise HTTPException(status_code=422, detail=f"Invalid activity data: {exc.orig}")
     return {"success": True, "activity": serialize_activity(activity)}
 
 
