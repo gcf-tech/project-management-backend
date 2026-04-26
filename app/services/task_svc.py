@@ -34,6 +34,7 @@ def serialize_task(task: Task) -> dict:
             {"id": t.id, "date": t.log_date.isoformat(), "seconds": t.seconds}
             for t in task.time_logs
         ],
+        "completedAt": task.completed_at.isoformat() if task.completed_at else None,
         "createdAt": task.created_at.isoformat() if task.created_at else None,
         "updatedAt": task.updated_at.isoformat() if task.updated_at else None,
     }
@@ -63,6 +64,7 @@ def serialize_activity(activity: Activity) -> dict:
             {"id": t.id, "date": t.log_date.isoformat(), "seconds": t.seconds}
             for t in activity.time_logs
         ],
+        "completedAt": activity.completed_at.isoformat() if activity.completed_at else None,
         "createdAt": activity.created_at.isoformat() if activity.created_at else None,
         "updatedAt": activity.updated_at.isoformat() if activity.updated_at else None,
     }

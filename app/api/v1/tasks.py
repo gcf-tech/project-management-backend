@@ -84,13 +84,20 @@ async def create_task(
     if data.assignedTo:
         assigned_user = db.query(User).filter(User.nc_user_id == data.assignedTo).first()
 
+    # Retroactive tasks assigned to another user require admin or leader role.
+    if data.is_retroactive and assigned_user and assigned_user.id != user.id and user.role not in ("admin", "leader"):
+        raise HTTPException(status_code=403, detail="Only admins or leaders can create retroactive tasks for other users")
+
     task = Task(
         id=task_id, title=data.title, description=data.description,
         owner_id=user.id, assigned_to=assigned_user.id if assigned_user else None,
-        column_status=data.column, type=data.type, priority=data.priority,
+        column_status="completed" if data.is_retroactive else data.column,
+        type=data.type, priority=data.priority,
         start_date=parse_date(data.startDate), deadline=parse_date(data.deadline),
         difficulty=data.difficulty, difficulty_reason=data.difficultyReason,
         was_difficult=data.wasDifficult, deck_card_id=data.deckCardId,
+        progress=100 if data.is_retroactive else 0,
+        completed_at=data.completed_at if data.is_retroactive else None,
     )
     db.add(task)
 
@@ -98,10 +105,37 @@ async def create_task(
         db.add(Subtask(
             id=sub.get("id", _gen_subtask_id(idx)),
             task_id=task_id, text=sub.get("text", ""),
-            completed=sub.get("completed", False), time_spent=sub.get("timeSpent", 0),
+            completed=True if data.is_retroactive else sub.get("completed", False),
+            time_spent=sub.get("timeSpent", 0),
         ))
 
-    db.commit()
+    try:
+        db.flush()
+
+        if data.is_retroactive and data.time_logs:
+            total_seconds = 0
+            for entry in data.time_logs:
+                seconds = int(round(entry.hours * 3600))
+                db.add(TimeLog(
+                    user_id=user.id,
+                    task_id=task_id,
+                    log_date=entry.log_date,
+                    seconds=seconds,
+                    client_op_id=f"retro-{task_id}-{entry.log_date.isoformat()}",
+                ))
+                total_seconds += seconds
+            db.flush()
+            task.time_spent = total_seconds
+
+        db.commit()
+    except (IntegrityError, DataError) as exc:
+        db.rollback()
+        logger.error(
+            "DB error creating task | user_id=%s payload=%s error=%s",
+            user.id, data.model_dump(), str(exc.orig),
+        )
+        raise HTTPException(status_code=422, detail=f"Invalid task data: {exc.orig}")
+
     db.refresh(task)
     return {"success": True, "task": serialize_task(task)}
 
@@ -375,14 +409,34 @@ async def create_activity(
     if data.assignedTo:
         assigned_user = db.query(User).filter(User.nc_user_id == data.assignedTo).first()
 
+    activity_id = _gen_activity_id()
     activity = Activity(
-        id=_gen_activity_id(), title=data.title, description=data.description,
+        id=activity_id, title=data.title, description=data.description,
         owner_id=user.id, assigned_to=assigned_user.id if assigned_user else None,
         type=data.type, priority=data.priority,
         start_date=parse_date(data.startDate), deadline=parse_date(data.deadline),
+        progress=100 if data.is_retroactive else 0,
+        completed_at=data.completed_at if data.is_retroactive else None,
     )
     try:
         db.add(activity)
+        db.flush()
+
+        if data.is_retroactive and data.time_logs:
+            total_seconds = 0
+            for entry in data.time_logs:
+                seconds = int(round(entry.hours * 3600))
+                db.add(TimeLog(
+                    user_id=user.id,
+                    activity_id=activity_id,
+                    log_date=entry.log_date,
+                    seconds=seconds,
+                    client_op_id=f"retro-act-{activity_id}-{entry.log_date.isoformat()}",
+                ))
+                total_seconds += seconds
+            db.flush()
+            activity.time_spent = total_seconds
+
         db.commit()
         db.refresh(activity)
     except (IntegrityError, DataError) as exc:
