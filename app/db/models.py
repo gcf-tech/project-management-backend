@@ -1,7 +1,7 @@
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean,
-    Enum, Date, DateTime, DECIMAL, ForeignKey, CheckConstraint, Time, Index
+    Enum, Date, DateTime, DECIMAL, ForeignKey, CheckConstraint, Time, Index, JSON
 )
 from sqlalchemy.orm import relationship
 from app.db.database import Base
@@ -211,6 +211,7 @@ class UserPreferences(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     week_start_day = Column(Integer, default=1, nullable=False)
     week_end_day = Column(Integer, default=5, nullable=False)
+    calendar_view = Column(String(20), nullable=False, default="week")
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
 
     user = relationship("User")
@@ -231,12 +232,22 @@ class WeeklyBlock(Base):
     start_time = Column(Time, nullable=False)
     end_time = Column(Time, nullable=False)
     notes = Column(Text, nullable=True)
+    recurrence = Column(Enum("none", "weekly"), nullable=False, default="none")
+    recurrence_until = Column(Date, nullable=True)
+    series_id = Column(String(36), nullable=True)
+    # ── RRule columns (Phase 3) ──────────────────────────────────────────────
+    rrule_string    = Column(String(500), nullable=True)
+    dtstart         = Column(DateTime, nullable=True)
+    rrule_until     = Column(DateTime, nullable=True)
+    parent_block_id = Column(Integer, ForeignKey("weekly_blocks.id", ondelete="SET NULL"), nullable=True)
+    exception_dates = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
 
     user = relationship("User")
     task = relationship("Task")
     activity = relationship("Activity")
+    parent_block = relationship("WeeklyBlock", remote_side="WeeklyBlock.id", foreign_keys=[parent_block_id])
 
     __table_args__ = (
         CheckConstraint("end_time > start_time", name="chk_weekly_block_end_after_start"),
@@ -253,4 +264,5 @@ class WeeklyBlock(Base):
             name="chk_weekly_block_personal_title",
         ),
         Index("idx_weekly_blocks_user_week", "user_id", "week_start"),
+        Index("idx_weekly_blocks_series", "series_id"),
     )

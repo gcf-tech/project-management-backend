@@ -1,7 +1,8 @@
 from datetime import date, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func, extract
-from app.db.models import Task, TimeLog, User, Team
+from app.db.models import Task, Activity, TimeLog, User, Team
+from app.db.query_helpers import join_active_parents
 
 MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
                'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -31,7 +32,9 @@ def calculate_user_metrics(db: Session, user_id: int,
     completed_tasks = completed_tasks_q.count()
     completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
 
-    total_seconds = db.query(func.sum(TimeLog.seconds)).filter(
+    total_seconds = join_active_parents(
+        db.query(func.sum(TimeLog.seconds))
+    ).filter(
         TimeLog.user_id == user_id,
         TimeLog.log_date >= start_date,
         TimeLog.log_date <= end_date,
@@ -77,7 +80,9 @@ def calculate_user_metrics(db: Session, user_id: int,
     ]
 
     eighty_four_days_ago = end_date - timedelta(days=84)
-    time_logs = db.query(TimeLog).filter(
+    time_logs = join_active_parents(
+        db.query(TimeLog)
+    ).filter(
         TimeLog.user_id == user_id,
         TimeLog.log_date >= eighty_four_days_ago,
         TimeLog.log_date <= end_date,
@@ -172,7 +177,9 @@ def calculate_team_metrics(db: Session, team_id: int,
 
     completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
 
-    total_seconds = db.query(func.sum(TimeLog.seconds)).filter(
+    total_seconds = join_active_parents(
+        db.query(func.sum(TimeLog.seconds))
+    ).filter(
         TimeLog.user_id.in_(member_ids),
         TimeLog.log_date >= start_date,
         TimeLog.log_date <= end_date,
