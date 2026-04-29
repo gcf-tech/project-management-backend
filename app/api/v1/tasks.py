@@ -285,6 +285,7 @@ async def record_task_time(
         db, task, user_id,
         time_data.timeSpent, time_data.absoluteTime,
         time_data.subtaskId, time_data.feedback,
+        time_data.startAt,
     )
     return {"success": True, "task": serialize_task(task)}
 
@@ -548,6 +549,7 @@ async def record_activity_time(
         db, activity, user_id,
         time_data.timeSpent, time_data.absoluteTime,
         time_data.feedback,
+        time_data.startAt,
     )
     return {"success": True, "activity": serialize_activity(activity)}
 
@@ -619,7 +621,8 @@ async def create_task_time_log(
         task_id=task_id,
         log_date=log_date,
         seconds=data.seconds,
-        client_op_id=data.clientOpId
+        client_op_id=data.clientOpId,
+        start_at=data.startAt,
     )
     db.add(new_log)
     db.flush()
@@ -671,7 +674,8 @@ async def create_activity_time_log(
         activity_id=activity_id,
         log_date=log_date,
         seconds=data.seconds,
-        client_op_id=data.clientOpId
+        client_op_id=data.clientOpId,
+        start_at=data.startAt,
     )
     db.add(new_log)
     db.flush()
@@ -731,6 +735,8 @@ async def patch_time_log(
             raise HTTPException(status_code=400, detail="Invalid seconds")
         time_log.seconds = data.seconds
         time_log.client_op_id = data.clientOpId
+        if data.startAt is not None:
+            time_log.start_at = data.startAt
 
     db.flush()
     if task_id:

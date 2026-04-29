@@ -95,6 +95,7 @@ def record_time_on_task(
     absolute_time: Optional[int],
     subtask_id: Optional[str],
     feedback: Optional[dict],
+    start_at: Optional[datetime] = None,
 ) -> Task:
     today = date.today()
     time_log = db.query(TimeLog).filter(
@@ -112,16 +113,20 @@ def record_time_on_task(
             else:
                 time_log.seconds = new_seconds
         else:
-            db.add(TimeLog(user_id=user_id, task_id=task.id, log_date=today, seconds=absolute_time))
+            db.add(TimeLog(user_id=user_id, task_id=task.id, log_date=today, seconds=absolute_time, start_at=start_at))
     else:
         if time_log:
             time_log.seconds += time_spent
+            # preserve original start_at; only set if not already recorded
+            if time_log.start_at is None and start_at is not None:
+                time_log.start_at = start_at
         else:
             db.add(TimeLog(
                 user_id=user_id,
                 task_id=task.id,
                 log_date=today,
                 seconds=time_spent,
+                start_at=start_at,
             ))
 
     db.flush()
@@ -152,6 +157,7 @@ def record_time_on_activity(
     time_spent: int,
     absolute_time: Optional[int],
     feedback: Optional[dict],
+    start_at: Optional[datetime] = None,
 ) -> Activity:
     today = date.today()
     time_log = db.query(TimeLog).filter(
@@ -169,16 +175,19 @@ def record_time_on_activity(
             else:
                 time_log.seconds = new_seconds
         else:
-            db.add(TimeLog(user_id=user_id, activity_id=activity.id, log_date=today, seconds=absolute_time))
+            db.add(TimeLog(user_id=user_id, activity_id=activity.id, log_date=today, seconds=absolute_time, start_at=start_at))
     else:
         if time_log:
             time_log.seconds += time_spent
+            if time_log.start_at is None and start_at is not None:
+                time_log.start_at = start_at
         else:
             db.add(TimeLog(
                 user_id=user_id,
                 activity_id=activity.id,
                 log_date=today,
                 seconds=time_spent,
+                start_at=start_at,
             ))
 
     db.flush()

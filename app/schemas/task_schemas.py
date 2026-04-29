@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import date as date_type, datetime, timezone
 from enum import Enum as PyEnum
 from typing import Optional, List
@@ -223,6 +225,7 @@ class TimeRecord(BaseModel):
     subtaskId: Optional[str] = None
     feedback: Optional[dict] = None
     absoluteTime: Optional[int] = None
+    startAt: Optional[datetime] = None
 
 
 class ColumnUpdate(BaseModel):
@@ -233,8 +236,10 @@ class TimeLogCreate(BaseModel):
     logDate: str
     seconds: int
     clientOpId: Optional[str] = None
+    startAt: Optional[datetime] = None
 
 
 class TimeLogPatch(BaseModel):
     seconds: int
     clientOpId: Optional[str] = None
+    startAt: Optional[datetime] = None

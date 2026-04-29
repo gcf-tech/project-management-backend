@@ -9,6 +9,8 @@ from sqlalchemy import or_
 
 from app.api.dependencies import get_db, get_current_user
 from app.db.models import Task, Activity, UserPreferences, WeeklyBlock
+from app.schemas.weekly import WeeklyBlockUnified
+from app.services.weekly_aggregator_service import get_unified_week
 from app.services.weekly_recurrence import (
     serialize_block,
     get_virtual_projections,
@@ -184,6 +186,9 @@ async def get_blocks(
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+    if week_start > date.today() + timedelta(days=365):
+        raise HTTPException(status_code=400, detail="week_start no puede ser mayor a un año en el futuro")
+
     blocks = db.query(WeeklyBlock).filter(
         WeeklyBlock.user_id == user.id,
         WeeklyBlock.week_start == week_start,
@@ -209,6 +214,7 @@ async def get_blocks(
     rrule_masters = db.query(WeeklyBlock).filter(
         WeeklyBlock.user_id == user.id,
         WeeklyBlock.rrule_string.isnot(None),
+        WeeklyBlock.week_start <= week_end,
         or_(
             WeeklyBlock.dtstart.is_(None),
             WeeklyBlock.dtstart <= datetime.combine(week_end, time.max),
@@ -222,6 +228,26 @@ async def get_blocks(
         result.append(serialize_block(master, is_master=True))
 
     return result
+
+
+@router.get("/unified")
+async def get_unified_blocks(
+    week_start: date = Query(...),
+    authorization: Annotated[str | None, Header()] = None,
+    db: Session = Depends(get_db),
+):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    user = await get_current_user(authorization, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if week_start > date.today() + timedelta(days=365):
+        raise HTTPException(status_code=400, detail="week_start no puede ser mayor a un año en el futuro")
+
+    end_date = week_start + timedelta(days=6)
+    blocks = get_unified_week(db, user.id, week_start, end_date)
+    return [b.model_dump() for b in blocks]
 
 
 @router.post("/blocks", status_code=201)
@@ -514,6 +540,9 @@ async def aggregate_blocks(
     user = await get_current_user(authorization, db)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+    if (to_date - from_date).days > 366:
+        raise HTTPException(status_code=400, detail="El rango from/to no puede superar 366 días")
 
     # Fetch blocks whose week_start falls in a range that could contain the interval
     blocks = db.query(WeeklyBlock).filter(

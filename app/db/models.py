@@ -1,3 +1,6 @@
+# TECH DEBT: all DateTime columns below use naive DateTime (no timezone=True).
+# They should be migrated to DateTime(timezone=True) so the ORM stores and
+# returns timezone-aware values. Migration is deferred — see biz-hours ticket.
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean,
@@ -127,6 +130,7 @@ class TimeLog(Base):
     activity_id = Column(String(50), ForeignKey("activities.id", ondelete="CASCADE"), nullable=True)
     log_date = Column(Date, nullable=False)
     seconds = Column(Integer, default=0)
+    start_at = Column(DateTime, nullable=True)
     client_op_id = Column(String(64), unique=True, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -138,6 +142,8 @@ class TimeLog(Base):
     __table_args__ = (
         Index("uq_time_logs_user_task_date", "user_id", "task_id", "log_date", unique=True),
         Index("uq_time_logs_user_activity_date", "user_id", "activity_id", "log_date", unique=True),
+        Index("idx_time_logs_user_task_logdate", "user_id", "task_id", "log_date"),
+        Index("idx_time_logs_user_activity_logdate", "user_id", "activity_id", "log_date"),
     )
 
 

@@ -11,3 +11,7 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_NAME = os.getenv("DB_NAME", "activity_tracker")
 
 DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+BUSINESS_TIMEZONE  = "America/New_York"
+BUSINESS_HOUR_START = 8
+BUSINESS_HOUR_END   = 17
