@@ -8,6 +8,7 @@ from app.api.dependencies import get_db, get_current_user
 from app.db.models import User, Team, Skill, UserSkill, SkillEndorsement
 from app.schemas.user_schemas import UserUpdate, TeamCreate, TeamUpdate, SkillScore, SkillEndorsementCreate
 from app.services.nextcloud_svc import fetch_deck_boards, fetch_deck_cards
+from app.core.security import get_nc_user_groups
 
 router = APIRouter()
 
@@ -456,6 +457,64 @@ async def delete_team(
     db.delete(team)
     db.commit()
     return {"success": True}
+
+
+@router.post("/admin/users/{user_id}/sync-nc")
+async def sync_user_from_nc(
+    user_id: int,
+    authorization: Annotated[str | None, Header()] = None,
+    db: Session = Depends(get_db),
+):
+    """Re-sync a user's role and team from Nextcloud groups using the admin's token."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    current_user = await get_current_user(authorization, db)
+    if not current_user or current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        groups = await get_nc_user_groups(target.nc_user_id, authorization)
+
+        if "admin" in groups:
+            role = "admin"
+        elif "Supervisors" in groups:
+            role = "leader"
+        else:
+            role = "member"
+
+        excluded = {"admin", "Supervisors", "emploiee"}
+        team_groups = [g for g in groups if g not in excluded]
+        if team_groups:
+            team_name = team_groups[0]
+            team = db.query(Team).filter(Team.name == team_name).first()
+            if not team:
+                team = Team(name=team_name, is_tech_team=team_name.lower() == "tech")
+                db.add(team)
+                db.flush()
+            target.team_id = team.id
+        else:
+            target.team_id = None
+
+        target.role = role
+        target.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(target)
+
+        return {
+            "success": True,
+            "user": {
+                "id": target.id,
+                "displayName": target.display_name,
+                "role": target.role,
+                "teamId": target.team_id,
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Nextcloud sync failed: {str(e)}")
 
 
 @router.post("/admin/teams/{team_id}/add-member")

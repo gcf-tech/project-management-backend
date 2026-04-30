@@ -1,10 +1,11 @@
 from datetime import datetime, date, time, timedelta
 from typing import Optional, Annotated, Literal, List
 from uuid import uuid4
+import hashlib
 import json as _json
-from fastapi import APIRouter, HTTPException, Header, Depends, Query
+from fastapi import APIRouter, HTTPException, Header, Depends, Query, Response
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import or_
 
 from app.api.dependencies import get_db, get_current_user
@@ -107,6 +108,7 @@ class WeeklyBlockOut(BaseModel):
 
 @router.get("/preferences")
 async def get_preferences(
+    response: Response,
     authorization: Annotated[str | None, Header()] = None,
     db: Session = Depends(get_db),
 ):
@@ -115,6 +117,10 @@ async def get_preferences(
     user = await get_current_user(authorization, db)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+    # 5 min — same as PREFS_TTL_MS in the JS persistent cache.
+    response.headers["Cache-Control"] = "private, max-age=300"
+    response.headers["Vary"] = "Authorization"
 
     prefs = db.query(UserPreferences).filter(UserPreferences.user_id == user.id).first()
     if not prefs:
@@ -178,6 +184,7 @@ async def update_preferences(
 async def get_blocks(
     week_start: date = Query(...),
     authorization: Annotated[str | None, Header()] = None,
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
     db: Session = Depends(get_db),
 ):
     if not authorization:
@@ -189,10 +196,24 @@ async def get_blocks(
     if week_start > date.today() + timedelta(days=365):
         raise HTTPException(status_code=400, detail="week_start no puede ser mayor a un año en el futuro")
 
-    blocks = db.query(WeeklyBlock).filter(
-        WeeklyBlock.user_id == user.id,
-        WeeklyBlock.week_start == week_start,
-    ).all()
+    # Exclude rrule masters here — they are returned separately below as is_master=True.
+    # Including them in this query would add a second entry (is_master=False) that the
+    # client treats as a concrete block, causing a duplicate on the creation week.
+    # selectinload pre-fetches the related Task/Activity rows in a single batched
+    # query, eliminating the N+1 caused by `block.task` access in serialize_block.
+    blocks = (
+        db.query(WeeklyBlock)
+        .options(
+            selectinload(WeeklyBlock.task),
+            selectinload(WeeklyBlock.activity),
+        )
+        .filter(
+            WeeklyBlock.user_id == user.id,
+            WeeklyBlock.week_start == week_start,
+            WeeklyBlock.rrule_string.is_(None),
+        )
+        .all()
+    )
 
     result = []
     for block in blocks:
@@ -211,23 +232,46 @@ async def get_blocks(
     # RRule master blocks: returned for client-side expansion.
     # Include masters whose date range overlaps the requested week.
     week_end = week_start + timedelta(days=6)
-    rrule_masters = db.query(WeeklyBlock).filter(
-        WeeklyBlock.user_id == user.id,
-        WeeklyBlock.rrule_string.isnot(None),
-        WeeklyBlock.week_start <= week_end,
-        or_(
-            WeeklyBlock.dtstart.is_(None),
-            WeeklyBlock.dtstart <= datetime.combine(week_end, time.max),
-        ),
-        or_(
-            WeeklyBlock.rrule_until.is_(None),
-            WeeklyBlock.rrule_until >= datetime.combine(week_start, time.min),
-        ),
-    ).all()
+    rrule_masters = (
+        db.query(WeeklyBlock)
+        .options(
+            selectinload(WeeklyBlock.task),
+            selectinload(WeeklyBlock.activity),
+        )
+        .filter(
+            WeeklyBlock.user_id == user.id,
+            WeeklyBlock.rrule_string.isnot(None),
+            WeeklyBlock.week_start <= week_end,
+            or_(
+                WeeklyBlock.dtstart.is_(None),
+                WeeklyBlock.dtstart <= datetime.combine(week_end, time.max),
+            ),
+            or_(
+                WeeklyBlock.rrule_until.is_(None),
+                WeeklyBlock.rrule_until >= datetime.combine(week_start, time.min),
+            ),
+        )
+        .all()
+    )
     for master in rrule_masters:
         result.append(serialize_block(master, is_master=True))
 
-    return result
+    # ── HTTP caching: ETag + Cache-Control ───────────────────────────────────
+    # Serialize deterministically so the same payload always hashes identically.
+    # `default=str` matches FastAPI's date/time encoding (date.isoformat / time.isoformat).
+    payload_bytes = _json.dumps(result, sort_keys=True, default=str).encode("utf-8")
+    etag         = f'"{hashlib.sha256(payload_bytes).hexdigest()[:16]}"'
+
+    headers = {
+        "Cache-Control": "private, max-age=30, stale-while-revalidate=120",
+        "ETag":          etag,
+        "Vary":          "Authorization",
+    }
+
+    if if_none_match and if_none_match == etag:
+        return Response(status_code=304, headers=headers)
+
+    return Response(content=payload_bytes, media_type="application/json", headers=headers)
 
 
 @router.get("/unified")

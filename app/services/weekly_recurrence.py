@@ -30,7 +30,7 @@ def serialize_block(
     # Virtual blocks (old system) use compound id: "<series_id>:<week_start_iso>"
     block_id = f"{block.series_id}:{week_start.isoformat()}" if is_virtual else block.id
 
-    return {
+    payload = {
         "id": block_id,
         "week_start": week_start,
         "day_of_week": block.day_of_week,
@@ -57,6 +57,15 @@ def serialize_block(
         "parent_block_id": block.parent_block_id,
         "exception_dates": block.exception_dates or [],
     }
+
+    # Payload trim (Fase 1, Tarea 3) — drop fields that the JS _normalizeBlock
+    # already defaults. Keeps the wire payload compact without touching client code.
+    if payload["notes"] is None or payload["notes"] == "":
+        payload.pop("notes")
+    if not payload["exception_dates"]:
+        payload.pop("exception_dates")
+
+    return payload
 
 
 def get_virtual_projections(db: Session, user_id: int, week_start: date) -> list[dict]:

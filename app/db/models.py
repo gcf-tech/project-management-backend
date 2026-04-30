@@ -271,4 +271,8 @@ class WeeklyBlock(Base):
         ),
         Index("idx_weekly_blocks_user_week", "user_id", "week_start"),
         Index("idx_weekly_blocks_series", "series_id"),
+        # Composite index for the get_virtual_projections / series-scoped queries
+        # (e.g. delete_materializations_*). MySQL EXPLAIN should now report
+        # type=ref instead of falling back to a non-prefix scan.
+        Index("idx_weekly_blocks_user_series", "user_id", "series_id"),
     )

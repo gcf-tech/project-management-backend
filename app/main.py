@@ -1,8 +1,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
-from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router
+from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router, calendar
 
 
 @asynccontextmanager
@@ -29,6 +30,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Calendar payloads can grow large with many events; gzip cuts wire size
+# substantially. 1 KB threshold avoids overhead on tiny responses.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Routers
 app.include_router(auth.router,    prefix="/auth")
@@ -36,6 +40,7 @@ app.include_router(tasks.router,   prefix="/api/proyectos")
 app.include_router(metrics.router, prefix="/api/dashboard")
 app.include_router(teams.router,   prefix="/api")
 app.include_router(weekly.router,       prefix="/api/weekly")
+app.include_router(calendar.router,     prefix="/api/calendar")
 app.include_router(config_router.router, prefix="/config")
 
 
