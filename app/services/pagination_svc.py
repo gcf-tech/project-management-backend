@@ -12,21 +12,30 @@ from app.schemas.pagination import PaginatedResponse
 
 ACTIVE_CAP = 500
 
+_CURSOR_VERSION = "v2"
 
-def encode_cursor(updated_at: datetime, item_id: str) -> str:
-    raw = f"{updated_at.isoformat()}|{item_id}"
+
+def encode_cursor(sort_value: Optional[datetime], item_id: str) -> str:
+    sort_str = sort_value.isoformat() if sort_value is not None else ""
+    raw = f"{_CURSOR_VERSION}|{sort_str}|{item_id}"
     return base64.urlsafe_b64encode(raw.encode()).decode()
 
 
-def decode_cursor(cursor: str) -> Tuple[datetime, str]:
-    # Any malformed input becomes a 400 so callers never see a 500.
+def decode_cursor(cursor: str) -> Tuple[Optional[datetime], str]:
     try:
         decoded = base64.urlsafe_b64decode(cursor.encode()).decode()
-        updated_at_str, item_id = decoded.split("|", 1)
-        updated_at = datetime.fromisoformat(updated_at_str)
+        if not decoded.startswith(f"{_CURSOR_VERSION}|"):
+            raise HTTPException(
+                status_code=400,
+                detail="Cursor format outdated, please refetch from start",
+            )
+        _, sort_str, item_id = decoded.split("|", 2)
+        sort_value = datetime.fromisoformat(sort_str) if sort_str else None
         if not item_id:
             raise ValueError("empty id")
-        return updated_at, item_id
+        return sort_value, item_id
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(
             status_code=400,
@@ -40,21 +49,27 @@ def paginate_cursor(
     cursor: Optional[str],
     limit: int,
     serialize_fn: Callable,
+    sort_col=None,
+    tie_breaker=None,
 ) -> PaginatedResponse:
+    _sort_col = sort_col if sort_col is not None else model.updated_at
+    _tie_col = tie_breaker if tie_breaker is not None else model.id
+    _sort_key = _sort_col.key
+    _tie_key = _tie_col.key
+
     if cursor:
-        cursor_updated_at, cursor_id = decode_cursor(cursor)
-        # Keyset seek for DESC: (ts < cursor_ts) OR (ts = cursor_ts AND id < cursor_id)
+        cursor_sort_val, cursor_tie_val = decode_cursor(cursor)
         query = query.filter(
             or_(
-                model.updated_at < cursor_updated_at,
+                _sort_col < cursor_sort_val,
                 and_(
-                    model.updated_at == cursor_updated_at,
-                    model.id < cursor_id,
+                    _sort_col == cursor_sort_val,
+                    _tie_col < cursor_tie_val,
                 ),
             )
         )
 
-    query = query.order_by(model.updated_at.desc(), model.id.desc())
+    query = query.order_by(_sort_col.desc(), _tie_col.desc())
 
     # limit+1 to detect whether a next page exists without a COUNT query.
     rows = query.limit(limit + 1).all()
@@ -65,7 +80,7 @@ def paginate_cursor(
     next_cursor: Optional[str] = None
     if has_more and page_items:
         last = page_items[-1]
-        next_cursor = encode_cursor(last.updated_at, last.id)
+        next_cursor = encode_cursor(getattr(last, _sort_key), getattr(last, _tie_key))
 
     return PaginatedResponse(
         items=[serialize_fn(item) for item in page_items],
