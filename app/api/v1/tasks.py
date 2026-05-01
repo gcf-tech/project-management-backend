@@ -79,11 +79,10 @@ async def get_tasks(
         )
 
     if status == "completed":
-        status_filter = and_(base_filter, Task.column_status == "completed")
-    else:
-        status_filter = base_filter
+        query = db.query(Task).filter(and_(base_filter, Task.column_status == "completed"))
+        return paginate_cursor(query, Task, cursor, limit, serialize_task, sort_col=Task.completed_at)
 
-    query = db.query(Task).filter(status_filter)
+    query = db.query(Task).filter(base_filter)
     return paginate_cursor(query, Task, cursor, limit, serialize_task)
 
 
@@ -445,11 +444,10 @@ async def get_activities(
         )
 
     if status == "completed":
-        status_filter = and_(base_filter, Activity.completed_at.isnot(None))
-    else:
-        status_filter = base_filter
+        query = db.query(Activity).filter(and_(base_filter, Activity.completed_at.isnot(None)))
+        return paginate_cursor(query, Activity, cursor, limit, serialize_activity, sort_col=Activity.completed_at)
 
-    query = db.query(Activity).filter(status_filter)
+    query = db.query(Activity).filter(base_filter)
     return paginate_cursor(query, Activity, cursor, limit, serialize_activity)
 
 
