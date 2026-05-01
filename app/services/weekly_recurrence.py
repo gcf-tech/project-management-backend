@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from app.db.models import WeeklyBlock
-from app.core.datetime_utils import to_rfc3339_z
 
 
 def serialize_block(
@@ -53,8 +52,8 @@ def serialize_block(
         "recurrence_until": block.recurrence_until,
         # RRule fields
         "rrule_string": block.rrule_string,
-        "dtstart": to_rfc3339_z(block.dtstart),
-        "rrule_until": to_rfc3339_z(block.rrule_until),
+        "dtstart": block.dtstart.isoformat() if block.dtstart else None,
+        "rrule_until": block.rrule_until.isoformat() if block.rrule_until else None,
         "parent_block_id": block.parent_block_id,
         "exception_dates": block.exception_dates or [],
     }

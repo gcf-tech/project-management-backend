@@ -1,9 +1,8 @@
-from datetime import datetime, date, timezone
+from datetime import datetime, date
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.db.models import Task, Activity, Subtask, TimeLog, Observation, User
-from app.core.datetime_utils import to_rfc3339_z, utc_now, ensure_aware_utc
 
 
 def serialize_task(task: Task) -> dict:
@@ -28,16 +27,16 @@ def serialize_task(task: Task) -> dict:
             for s in task.subtasks
         ],
         "observations": [
-            {"date": to_rfc3339_z(o.created_at), "text": o.text}
+            {"date": o.created_at.isoformat(), "text": o.text}
             for o in task.observations
         ],
         "timeLog": [
             {"id": t.id, "date": t.log_date.isoformat(), "seconds": t.seconds}
             for t in task.time_logs
         ],
-        "completedAt": to_rfc3339_z(task.completed_at),
-        "createdAt": to_rfc3339_z(task.created_at),
-        "updatedAt": to_rfc3339_z(task.updated_at),
+        "completedAt": task.completed_at.isoformat() if task.completed_at else None,
+        "createdAt": task.created_at.isoformat() if task.created_at else None,
+        "updatedAt": task.updated_at.isoformat() if task.updated_at else None,
     }
 
 
@@ -58,16 +57,16 @@ def serialize_activity(activity: Activity) -> dict:
         "progress": activity.progress,
         "timeSpent": activity.time_spent,
         "observations": [
-            {"date": to_rfc3339_z(o.created_at), "text": o.text}
+            {"date": o.created_at.isoformat(), "text": o.text}
             for o in activity.observations
         ],
         "timeLog": [
             {"id": t.id, "date": t.log_date.isoformat(), "seconds": t.seconds}
             for t in activity.time_logs
         ],
-        "completedAt": to_rfc3339_z(activity.completed_at),
-        "createdAt": to_rfc3339_z(activity.created_at),
-        "updatedAt": to_rfc3339_z(activity.updated_at),
+        "completedAt": activity.completed_at.isoformat() if activity.completed_at else None,
+        "createdAt": activity.created_at.isoformat() if activity.created_at else None,
+        "updatedAt": activity.updated_at.isoformat() if activity.updated_at else None,
     }
 
 def _recalc_time_spent(db: Session, task_id: Optional[str] = None, activity_id: Optional[str] = None):
@@ -76,14 +75,14 @@ def _recalc_time_spent(db: Session, task_id: Optional[str] = None, activity_id: 
         if task:
             total_seconds = db.query(func.sum(TimeLog.seconds)).filter(TimeLog.task_id == task_id).scalar() or 0
             task.time_spent = int(total_seconds)
-            task.updated_at = utc_now()
+            task.updated_at = datetime.utcnow()
             return task
     elif activity_id:
         activity = db.query(Activity).with_for_update().filter(Activity.id == activity_id).first()
         if activity:
             total_seconds = db.query(func.sum(TimeLog.seconds)).filter(TimeLog.activity_id == activity_id).scalar() or 0
             activity.time_spent = int(total_seconds)
-            activity.updated_at = utc_now()
+            activity.updated_at = datetime.utcnow()
             return activity
     return None
 
@@ -98,7 +97,7 @@ def record_time_on_task(
     feedback: Optional[dict],
     start_at: Optional[datetime] = None,
 ) -> Task:
-    today = datetime.now(timezone.utc).date()
+    today = date.today()
     time_log = db.query(TimeLog).filter(
         TimeLog.task_id == task.id,
         TimeLog.log_date == today,
@@ -114,28 +113,20 @@ def record_time_on_task(
             else:
                 time_log.seconds = new_seconds
         else:
-            db.add(
-                TimeLog(
-                    user_id=user_id,
-                    task_id=task.id,
-                    log_date=today,
-                    seconds=absolute_time,
-                    start_at=ensure_aware_utc(start_at) if start_at is not None else None,
-                )
-            )
+            db.add(TimeLog(user_id=user_id, task_id=task.id, log_date=today, seconds=absolute_time, start_at=start_at))
     else:
         if time_log:
             time_log.seconds += time_spent
             # preserve original start_at; only set if not already recorded
             if time_log.start_at is None and start_at is not None:
-                time_log.start_at = ensure_aware_utc(start_at)
+                time_log.start_at = start_at
         else:
             db.add(TimeLog(
                 user_id=user_id,
                 task_id=task.id,
                 log_date=today,
                 seconds=time_spent,
-                start_at=ensure_aware_utc(start_at) if start_at is not None else None,
+                start_at=start_at,
             ))
 
     db.flush()
@@ -168,7 +159,7 @@ def record_time_on_activity(
     feedback: Optional[dict],
     start_at: Optional[datetime] = None,
 ) -> Activity:
-    today = datetime.now(timezone.utc).date()
+    today = date.today()
     time_log = db.query(TimeLog).filter(
         TimeLog.activity_id == activity.id,
         TimeLog.log_date == today,
@@ -184,27 +175,19 @@ def record_time_on_activity(
             else:
                 time_log.seconds = new_seconds
         else:
-            db.add(
-                TimeLog(
-                    user_id=user_id,
-                    activity_id=activity.id,
-                    log_date=today,
-                    seconds=absolute_time,
-                    start_at=ensure_aware_utc(start_at) if start_at is not None else None,
-                )
-            )
+            db.add(TimeLog(user_id=user_id, activity_id=activity.id, log_date=today, seconds=absolute_time, start_at=start_at))
     else:
         if time_log:
             time_log.seconds += time_spent
             if time_log.start_at is None and start_at is not None:
-                time_log.start_at = ensure_aware_utc(start_at)
+                time_log.start_at = start_at
         else:
             db.add(TimeLog(
                 user_id=user_id,
                 activity_id=activity.id,
                 log_date=today,
                 seconds=time_spent,
-                start_at=ensure_aware_utc(start_at) if start_at is not None else None,
+                start_at=start_at,
             ))
 
     db.flush()

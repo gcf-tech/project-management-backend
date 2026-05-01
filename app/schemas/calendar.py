@@ -3,11 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import ConfigDict
-from app.schemas.base import UTCModel
+from pydantic import BaseModel, ConfigDict
 
 
-class CalendarEventOut(UTCModel):
+class CalendarEventOut(BaseModel):
     """Wire shape for /api/calendar/events.
 
     Matches `CalendarEvent` 1:1; defined separately so we can evolve the
@@ -33,12 +32,12 @@ class CalendarEventOut(UTCModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class CalendarEventsResponse(UTCModel):
+class CalendarEventsResponse(BaseModel):
     events: list[CalendarEventOut]
     # Mirrors `EventQueryResult.source`. Useful for the frontend to decide
     # whether to surface a "actualizando…" indicator when source=="stale".
     cache: Literal["fresh", "stale", "miss"]
 
 
-class InvalidateResponse(UTCModel):
+class InvalidateResponse(BaseModel):
     deleted: int

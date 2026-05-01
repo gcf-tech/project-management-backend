@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Dict, Any, Literal, Optional
-from pydantic import ConfigDict
-from app.schemas.base import UTCModel
+from pydantic import BaseModel, ConfigDict
 
 
-class WeeklyBlockUnified(UTCModel):
+class WeeklyBlockUnified(BaseModel):
     id: str
     source: Literal["manual", "task", "activity"]
     source_ref_id: Optional[str]
