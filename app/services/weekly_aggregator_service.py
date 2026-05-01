@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import List
 
 from sqlalchemy.orm import Session, joinedload
@@ -48,7 +48,7 @@ def get_unified_week(
         actual_date = _block_actual_date(block)
         if not (start_date <= actual_date <= end_date):
             continue
-        start_at = datetime.combine(actual_date, block.start_time)
+        start_at = datetime.combine(actual_date, block.start_time, tzinfo=timezone.utc)
         duration = _duration_minutes(block.start_time, block.end_time)
 
         if block.title:
@@ -90,9 +90,13 @@ def get_unified_week(
 
     for log in task_logs:
         if log.start_at is not None:
-            start_at = log.start_at
+            start_at = (
+                log.start_at.astimezone(timezone.utc)
+                if log.start_at.tzinfo is not None and log.start_at.utcoffset() is not None
+                else log.start_at.replace(tzinfo=timezone.utc)
+            )
         else:
-            start_at = datetime.combine(log.log_date, time(0, 0))
+            start_at = datetime.combine(log.log_date, time(0, 0), tzinfo=timezone.utc)
 
         result.append(WeeklyBlockUnified(
             id=f"task-log-{log.id}",
@@ -125,9 +129,13 @@ def get_unified_week(
 
     for log in activity_logs:
         if log.start_at is not None:
-            start_at = log.start_at
+            start_at = (
+                log.start_at.astimezone(timezone.utc)
+                if log.start_at.tzinfo is not None and log.start_at.utcoffset() is not None
+                else log.start_at.replace(tzinfo=timezone.utc)
+            )
         else:
-            start_at = datetime.combine(log.log_date, time(0, 0))
+            start_at = datetime.combine(log.log_date, time(0, 0), tzinfo=timezone.utc)
 
         result.append(WeeklyBlockUnified(
             id=f"activity-log-{log.id}",

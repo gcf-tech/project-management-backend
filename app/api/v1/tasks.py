@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional, Annotated, List
 from fastapi import APIRouter, HTTPException, Header, Depends
 from sqlalchemy.orm import Session
@@ -20,20 +20,21 @@ from app.services.task_svc import (
     _recalc_time_spent
 )
 from app.services.nextcloud_svc import parse_date
+from app.core.datetime_utils import utc_now, ensure_aware_utc, to_rfc3339_z
 
 router = APIRouter()
 
 
 def _gen_task_id() -> str:
-    return f"task-{int(datetime.utcnow().timestamp() * 1000)}"
+    return f"task-{int(utc_now().timestamp() * 1000)}"
 
 
 def _gen_activity_id() -> str:
-    return f"activity-{int(datetime.utcnow().timestamp() * 1000)}"
+    return f"activity-{int(utc_now().timestamp() * 1000)}"
 
 
 def _gen_subtask_id(index: int) -> str:
-    return f"sub-{int(datetime.utcnow().timestamp() * 1000)}-{index}"
+    return f"sub-{int(utc_now().timestamp() * 1000)}-{index}"
 
 
 # ── Tasks ─────────────────────────────────────────────────────────────────────
@@ -97,7 +98,7 @@ async def create_task(
         difficulty=data.difficulty, difficulty_reason=data.difficultyReason,
         was_difficult=data.wasDifficult, deck_card_id=data.deckCardId,
         progress=100 if data.is_retroactive else 0,
-        completed_at=data.completed_at if data.is_retroactive else None,
+        completed_at=ensure_aware_utc(data.completed_at) if (data.is_retroactive and data.completed_at) else None,
     )
     db.add(task)
 
@@ -198,7 +199,7 @@ async def patch_task(
         elif hasattr(task, field):
             setattr(task, field, value)
 
-    task.updated_at = datetime.utcnow()
+    task.updated_at = utc_now()
     db.commit()
     db.refresh(task)
     return {"success": True, "task": serialize_task(task)}
@@ -229,7 +230,7 @@ async def update_task(
     task.difficulty = data.difficulty
     task.difficulty_reason = data.difficultyReason
     task.was_difficult = data.wasDifficult
-    task.updated_at = datetime.utcnow()
+    task.updated_at = utc_now()
 
     db.query(Subtask).filter(Subtask.task_id == task_id).delete()
     for idx, sub in enumerate(data.subtasks):
@@ -259,7 +260,7 @@ async def delete_task(
         user = await get_current_user(authorization, db)
         if user and task.owner_id != user.id:
             raise HTTPException(status_code=403, detail="Access denied")
-    task.deleted_at = datetime.utcnow()
+    task.deleted_at = utc_now()
     task.deleted_by = user.id if user else None
     db.commit()
     return {"success": True}
@@ -323,9 +324,9 @@ async def update_task_column(
 
     task.column_status = data.column
     if data.column == "completed":
-        task.completed_at = datetime.utcnow()
+        task.completed_at = utc_now()
         task.progress = 100
-    task.updated_at = datetime.utcnow()
+    task.updated_at = utc_now()
     db.commit()
     db.refresh(task)
     return {"success": True, "task": serialize_task(task)}
@@ -346,9 +347,9 @@ async def finalize_task(
             raise HTTPException(status_code=403, detail="Access denied")
     task.progress = 100
     task.column_status = "completed"
-    task.completed_at = datetime.utcnow()
+    task.completed_at = utc_now()
     db.query(Subtask).filter(Subtask.task_id == task_id).update({"completed": True})
-    task.updated_at = datetime.utcnow()
+    task.updated_at = utc_now()
     db.commit()
     db.refresh(task)
     return {"success": True, "task": serialize_task(task)}
@@ -369,7 +370,7 @@ async def reabrir_task(
             raise HTTPException(status_code=403, detail="Access denied")
     task.column_status = "actively-working"
     task.completed_at = None
-    task.updated_at = datetime.utcnow()
+    task.updated_at = utc_now()
     db.commit()
     db.refresh(task)
     return {"success": True, "task": serialize_task(task)}
@@ -417,7 +418,7 @@ async def create_activity(
         type=data.type, priority=data.priority,
         start_date=parse_date(data.startDate), deadline=parse_date(data.deadline),
         progress=100 if data.is_retroactive else 0,
-        completed_at=data.completed_at if data.is_retroactive else None,
+        completed_at=ensure_aware_utc(data.completed_at) if (data.is_retroactive and data.completed_at) else None,
     )
     try:
         db.add(activity)
@@ -497,7 +498,7 @@ async def patch_activity(
         elif hasattr(activity, field):
             setattr(activity, field, value)
 
-    activity.updated_at = datetime.utcnow()
+    activity.updated_at = utc_now()
     try:
         db.commit()
         db.refresh(activity)
@@ -527,7 +528,7 @@ async def delete_activity(
         user = await get_current_user(authorization, db)
         if user and activity.owner_id != user.id:
             raise HTTPException(status_code=403, detail="Access denied")
-    activity.deleted_at = datetime.utcnow()
+    activity.deleted_at = utc_now()
     activity.deleted_by = user.id if user else None
     db.commit()
     return {"success": True}
@@ -577,7 +578,7 @@ async def reabrir_activity(
             raise HTTPException(status_code=403, detail="Access denied")
     activity.completed_at = None
     activity.progress = 0
-    activity.updated_at = datetime.utcnow()
+    activity.updated_at = utc_now()
     db.commit()
     db.refresh(activity)
     return {"success": True, "activity": serialize_activity(activity)}
@@ -605,7 +606,7 @@ async def create_task_time_log(
         raise HTTPException(status_code=400, detail="Invalid seconds")
 
     log_date = parse_date(data.logDate)
-    if log_date > date.today():
+    if log_date > datetime.now(timezone.utc).date():
         raise HTTPException(status_code=400, detail="Future dates not allowed")
 
     if data.clientOpId:
@@ -628,7 +629,7 @@ async def create_task_time_log(
         log_date=log_date,
         seconds=data.seconds,
         client_op_id=data.clientOpId,
-        start_at=data.startAt,
+        start_at=ensure_aware_utc(data.startAt) if data.startAt is not None else None,
     )
     db.add(new_log)
     db.flush()
@@ -658,7 +659,7 @@ async def create_activity_time_log(
         raise HTTPException(status_code=400, detail="Invalid seconds")
 
     log_date = parse_date(data.logDate)
-    if log_date > date.today():
+    if log_date > datetime.now(timezone.utc).date():
         raise HTTPException(status_code=400, detail="Future dates not allowed")
 
     if data.clientOpId:
@@ -681,7 +682,7 @@ async def create_activity_time_log(
         log_date=log_date,
         seconds=data.seconds,
         client_op_id=data.clientOpId,
-        start_at=data.startAt,
+        start_at=ensure_aware_utc(data.startAt) if data.startAt is not None else None,
     )
     db.add(new_log)
     db.flush()
@@ -697,7 +698,7 @@ async def get_task_time_logs(
     db: Session = Depends(get_db),
 ):
     logs = db.query(TimeLog).filter(TimeLog.task_id == task_id).order_by(TimeLog.log_date.desc()).all()
-    return [{"id": l.id, "logDate": l.log_date.isoformat(), "seconds": l.seconds, "userId": l.user_id, "updatedAt": l.updated_at.isoformat() if l.updated_at else None} for l in logs]
+    return [{"id": l.id, "logDate": l.log_date.isoformat(), "seconds": l.seconds, "userId": l.user_id, "updatedAt": to_rfc3339_z(l.updated_at)} for l in logs]
 
 @router.get("/activities/{activity_id}/time-logs")
 async def get_activity_time_logs(
@@ -706,7 +707,7 @@ async def get_activity_time_logs(
     db: Session = Depends(get_db),
 ):
     logs = db.query(TimeLog).filter(TimeLog.activity_id == activity_id).order_by(TimeLog.log_date.desc()).all()
-    return [{"id": l.id, "logDate": l.log_date.isoformat(), "seconds": l.seconds, "userId": l.user_id, "updatedAt": l.updated_at.isoformat() if l.updated_at else None} for l in logs]
+    return [{"id": l.id, "logDate": l.log_date.isoformat(), "seconds": l.seconds, "userId": l.user_id, "updatedAt": to_rfc3339_z(l.updated_at)} for l in logs]
 
 @router.patch("/time-logs/{log_id}")
 async def patch_time_log(
@@ -742,7 +743,7 @@ async def patch_time_log(
         time_log.seconds = data.seconds
         time_log.client_op_id = data.clientOpId
         if data.startAt is not None:
-            time_log.start_at = data.startAt
+            time_log.start_at = ensure_aware_utc(data.startAt)
 
     db.flush()
     if task_id:

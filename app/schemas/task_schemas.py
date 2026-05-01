@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import date as date_type, datetime, timezone
 from enum import Enum as PyEnum
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
+from app.schemas.base import UTCModel
 
 
 class ActivityType(str, PyEnum):
@@ -19,14 +20,14 @@ class TaskType(str, PyEnum):
     task = "task"
 
 
-class SubtaskCreate(BaseModel):
+class SubtaskCreate(UTCModel):
     id: Optional[str] = None
     text: str
     completed: bool = False
     timeSpent: int = 0
 
 
-class TimeLogEntry(BaseModel):
+class TimeLogEntry(UTCModel):
     log_date: date_type
     hours: float = Field(gt=0, le=24)
 
@@ -51,10 +52,6 @@ def _validate_retroactive_fields(is_retroactive, completed_at, startDate, time_l
 
     if completed_at is None:
         raise ValueError("completed_at is required when is_retroactive=True")
-
-    # Normalize naive datetimes to UTC so comparisons don't fail
-    if isinstance(completed_at, datetime) and completed_at.tzinfo is None:
-        completed_at = completed_at.replace(tzinfo=timezone.utc)
 
     completed_date = completed_at.date() if isinstance(completed_at, datetime) else completed_at
 
@@ -85,7 +82,7 @@ def _validate_retroactive_fields(is_retroactive, completed_at, startDate, time_l
         seen_dates.add(entry.log_date)
 
 
-class TaskCreate(BaseModel):
+class TaskCreate(UTCModel):
     title: str
     description: Optional[str] = ""
     column: str = "actively-working"
@@ -101,7 +98,7 @@ class TaskCreate(BaseModel):
     subtasks: List[dict] = Field(default_factory=list)
     deckCardId: Optional[int] = None
     is_retroactive: bool = False
-    completed_at: Optional[datetime] = None
+    completed_at: Optional[AwareDatetime] = None
     time_logs: Optional[List[TimeLogEntry]] = Field(default_factory=list)
 
     model_config = ConfigDict(
@@ -116,6 +113,8 @@ class TaskCreate(BaseModel):
         if v is None:
             return None
         if isinstance(v, datetime):
+            if v.tzinfo is None or v.utcoffset() is None:
+                raise ValueError("completedAt must include timezone offset")
             return v
         if isinstance(v, date_type):
             return datetime(v.year, v.month, v.day, tzinfo=timezone.utc)
@@ -159,7 +158,7 @@ class TaskPatch(BaseModel):
     timeLog: Optional[List[dict]] = None
 
 
-class ActivityCreate(BaseModel):
+class ActivityCreate(UTCModel):
     title: str
     description: Optional[str] = ""
     type: ActivityType = ActivityType.other
@@ -168,7 +167,7 @@ class ActivityCreate(BaseModel):
     deadline: Optional[str] = None
     assignedTo: Optional[str] = None
     is_retroactive: bool = False
-    completed_at: Optional[datetime] = None
+    completed_at: Optional[AwareDatetime] = None
     time_logs: Optional[List[TimeLogEntry]] = Field(default_factory=list)
 
     model_config = ConfigDict(
@@ -183,6 +182,8 @@ class ActivityCreate(BaseModel):
         if v is None:
             return None
         if isinstance(v, datetime):
+            if v.tzinfo is None or v.utcoffset() is None:
+                raise ValueError("completedAt must include timezone offset")
             return v
         if isinstance(v, date_type):
             return datetime(v.year, v.month, v.day, tzinfo=timezone.utc)
@@ -220,26 +221,26 @@ class ActivityPatch(BaseModel):
     timeLog: Optional[List[dict]] = None
 
 
-class TimeRecord(BaseModel):
+class TimeRecord(UTCModel):
     timeSpent: int
     subtaskId: Optional[str] = None
     feedback: Optional[dict] = None
     absoluteTime: Optional[int] = None
-    startAt: Optional[datetime] = None
+    startAt: Optional[AwareDatetime] = None
 
 
 class ColumnUpdate(BaseModel):
     column: str
 
 
-class TimeLogCreate(BaseModel):
+class TimeLogCreate(UTCModel):
     logDate: str
     seconds: int
     clientOpId: Optional[str] = None
-    startAt: Optional[datetime] = None
+    startAt: Optional[AwareDatetime] = None
 
 
-class TimeLogPatch(BaseModel):
+class TimeLogPatch(UTCModel):
     seconds: int
     clientOpId: Optional[str] = None
-    startAt: Optional[datetime] = None
+    startAt: Optional[AwareDatetime] = None
