@@ -468,6 +468,8 @@ async def patch_activity(
         if user and activity.owner_id != user.id:
             raise HTTPException(status_code=403, detail="Access denied")
 
+    prev_progress = activity.progress
+
     for field, value in data.model_dump(exclude_unset=True).items():
         if field == "startDate":
             activity.start_date = parse_date(value)
@@ -476,6 +478,10 @@ async def patch_activity(
         elif field == "timeSpent":
             activity.time_spent = value
         elif field == "progress":
+            if value == 100 and prev_progress != 100:
+                activity.completed_at = datetime.utcnow()
+            elif value < 100 and prev_progress == 100:
+                activity.completed_at = None
             activity.progress = value
         elif field == "assignedTo" and value:
             u = db.query(User).filter(User.nc_user_id == value).first()
