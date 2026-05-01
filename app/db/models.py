@@ -79,12 +79,6 @@ class Task(Base):
 
     __table_args__ = (
         CheckConstraint("difficulty BETWEEN 1 AND 10", name="chk_difficulty"),
-        # Supports cursor-pagination queries filtered by owner + status,
-        # ordered by updated_at DESC, id DESC.
-        Index(
-            "idx_tasks_owner_status_updated_id",
-            "owner_id", "column_status", "updated_at", "id",
-        ),
     )
 
 
@@ -112,15 +106,6 @@ class Activity(Base):
     assignee = relationship("User", foreign_keys=[assigned_to])
     time_logs = relationship("TimeLog", back_populates="activity", cascade="all, delete-orphan")
     observations = relationship("Observation", back_populates="activity", cascade="all, delete-orphan")
-
-    __table_args__ = (
-        # Supports cursor-pagination queries filtered by owner + completed_at,
-        # ordered by updated_at DESC, id DESC.
-        Index(
-            "idx_activities_owner_completed_updated_id",
-            "owner_id", "completed_at", "updated_at", "id",
-        ),
-    )
 
 
 class Subtask(Base):

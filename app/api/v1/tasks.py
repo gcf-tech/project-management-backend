@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, date
-from typing import Optional, Annotated, List, Literal, Union
-from fastapi import APIRouter, HTTPException, Header, Depends, Query
+from typing import Optional, Annotated, List
+from fastapi import APIRouter, HTTPException, Header, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError, DataError
@@ -14,14 +14,12 @@ from app.schemas.task_schemas import (
     TaskCreate, TaskPatch, ActivityCreate, ActivityPatch,
     TimeRecord, ColumnUpdate, TimeLogCreate, TimeLogPatch
 )
-from app.schemas.pagination import PaginatedResponse
 from app.services.task_svc import (
     serialize_task, serialize_activity,
     record_time_on_task, record_time_on_activity,
     _recalc_time_spent
 )
 from app.services.nextcloud_svc import parse_date
-from app.services.pagination_svc import paginate_cursor, ACTIVE_CAP
 
 router = APIRouter()
 
@@ -40,51 +38,21 @@ def _gen_subtask_id(index: int) -> str:
 
 # ── Tasks ─────────────────────────────────────────────────────────────────────
 
-@router.get("/tareas", response_model=PaginatedResponse)
+@router.get("/tareas")
 async def get_tasks(
     authorization: Annotated[str | None, Header()] = None,
     db: Session = Depends(get_db),
-    status: Literal["active", "completed", "all"] = Query(default="all"),
-    cursor: Optional[str] = Query(default=None),
-    limit: int = Query(default=25, ge=1, le=100),
 ):
     if not authorization:
-        return PaginatedResponse(items=[], has_more=False)
+        return []
     user = await get_current_user(authorization, db)
     if not user:
-        return PaginatedResponse(items=[], has_more=False)
-
-    base_filter = and_(
-        Task.deleted_at.is_(None),
-        or_(Task.owner_id == user.id, Task.assigned_to == user.id),
-    )
-
-    if status == "active":
-        active_filter = and_(
-            base_filter,
-            Task.column_status.in_(["actively-working", "working-now"]),
-        )
-        rows = (
-            db.query(Task)
-            .filter(active_filter)
-            .order_by(Task.updated_at.desc(), Task.id.desc())
-            .limit(ACTIVE_CAP)
-            .all()
-        )
-        return PaginatedResponse(
-            items=[serialize_task(t) for t in rows],
-            next_cursor=None,
-            has_more=False,
-            total=None,
-        )
-
-    if status == "completed":
-        status_filter = and_(base_filter, Task.column_status == "completed")
-    else:
-        status_filter = base_filter
-
-    query = db.query(Task).filter(status_filter)
-    return paginate_cursor(query, Task, cursor, limit, serialize_task)
+        return []
+    tasks = db.query(Task).filter(
+        and_(Task.deleted_at.is_(None),
+             or_(Task.owner_id == user.id, Task.assigned_to == user.id))
+    ).all()
+    return [serialize_task(t) for t in tasks]
 
 
 @router.get("/tareas/{task_id}")
@@ -409,48 +377,21 @@ async def reabrir_task(
 
 # ── Activities ───────────────────────────────────────────────────────────────
 
-@router.get("/activities", response_model=PaginatedResponse)
+@router.get("/activities")
 async def get_activities(
     authorization: Annotated[str | None, Header()] = None,
     db: Session = Depends(get_db),
-    status: Literal["active", "completed", "all"] = Query(default="all"),
-    cursor: Optional[str] = Query(default=None),
-    limit: int = Query(default=25, ge=1, le=100),
 ):
     if not authorization:
-        return PaginatedResponse(items=[], has_more=False)
+        return []
     user = await get_current_user(authorization, db)
     if not user:
-        return PaginatedResponse(items=[], has_more=False)
-
-    base_filter = and_(
-        Activity.deleted_at.is_(None),
-        or_(Activity.owner_id == user.id, Activity.assigned_to == user.id),
-    )
-
-    if status == "active":
-        active_filter = and_(base_filter, Activity.completed_at.is_(None))
-        rows = (
-            db.query(Activity)
-            .filter(active_filter)
-            .order_by(Activity.updated_at.desc(), Activity.id.desc())
-            .limit(ACTIVE_CAP)
-            .all()
-        )
-        return PaginatedResponse(
-            items=[serialize_activity(a) for a in rows],
-            next_cursor=None,
-            has_more=False,
-            total=None,
-        )
-
-    if status == "completed":
-        status_filter = and_(base_filter, Activity.completed_at.isnot(None))
-    else:
-        status_filter = base_filter
-
-    query = db.query(Activity).filter(status_filter)
-    return paginate_cursor(query, Activity, cursor, limit, serialize_activity)
+        return []
+    activities = db.query(Activity).filter(
+        and_(Activity.deleted_at.is_(None),
+             or_(Activity.owner_id == user.id, Activity.assigned_to == user.id))
+    ).all()
+    return [serialize_activity(a) for a in activities]
 
 
 @router.post("/activities")
