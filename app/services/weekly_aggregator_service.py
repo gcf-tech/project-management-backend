@@ -95,8 +95,21 @@ def get_unified_week(
                 if log.start_at.tzinfo is not None and log.start_at.utcoffset() is not None
                 else log.start_at.replace(tzinfo=timezone.utc)
             )
+        elif log.created_at is not None and log.seconds > 0:
+            created = (
+                log.created_at.astimezone(timezone.utc)
+                if log.created_at.tzinfo is not None and log.created_at.utcoffset() is not None
+                else log.created_at.replace(tzinfo=timezone.utc)
+            )
+            start_at = created - timedelta(seconds=log.seconds)
+        elif log.created_at is not None:
+            start_at = (
+                log.created_at.astimezone(timezone.utc)
+                if log.created_at.tzinfo is not None and log.created_at.utcoffset() is not None
+                else log.created_at.replace(tzinfo=timezone.utc)
+            )
         else:
-            start_at = datetime.combine(log.log_date, time(0, 0), tzinfo=timezone.utc)
+            continue  # start_at y created_at son NULL — no renderizar
 
         result.append(WeeklyBlockUnified(
             id=f"task-log-{log.id}",
@@ -134,8 +147,21 @@ def get_unified_week(
                 if log.start_at.tzinfo is not None and log.start_at.utcoffset() is not None
                 else log.start_at.replace(tzinfo=timezone.utc)
             )
+        elif log.created_at is not None and log.seconds > 0:
+            created = (
+                log.created_at.astimezone(timezone.utc)
+                if log.created_at.tzinfo is not None and log.created_at.utcoffset() is not None
+                else log.created_at.replace(tzinfo=timezone.utc)
+            )
+            start_at = created - timedelta(seconds=log.seconds)
+        elif log.created_at is not None:
+            start_at = (
+                log.created_at.astimezone(timezone.utc)
+                if log.created_at.tzinfo is not None and log.created_at.utcoffset() is not None
+                else log.created_at.replace(tzinfo=timezone.utc)
+            )
         else:
-            start_at = datetime.combine(log.log_date, time(0, 0), tzinfo=timezone.utc)
+            continue  # start_at y created_at son NULL — no renderizar
 
         result.append(WeeklyBlockUnified(
             id=f"activity-log-{log.id}",
