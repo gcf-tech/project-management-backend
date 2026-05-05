@@ -3,7 +3,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.schemas.report_request import PeriodType
 from app.services.reports.builders.base_builder import SheetBuilder, WorkbookContext
+
+_PERIOD_LABELS: dict[PeriodType, str] = {
+    PeriodType.WEEK: "Semanal",
+    PeriodType.MONTH: "Mensual",
+    PeriodType.QUARTER: "Trimestral",
+    PeriodType.CUSTOM: "Personalizado",
+}
 
 _GLOSSARY = [
     (
@@ -53,7 +61,7 @@ class CoverBuilder(SheetBuilder):
 
         # Rows 2–7 (filas 3–8): two-column metadata block
         metadata = [
-            ("Tipo de Periodo",  req.period.type.value),
+            ("Tipo de Periodo",  _PERIOD_LABELS[req.period.type]),
             ("Fecha Inicio",     str(req.period.start_date)),
             ("Fecha Fin",        str(req.period.end_date)),
             ("Fecha Generación", org.generated_at.isoformat()),
