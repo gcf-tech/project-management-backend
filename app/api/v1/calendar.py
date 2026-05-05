@@ -27,7 +27,8 @@ from app.api.dependencies import get_current_user, get_db
 from app.core.cache import get_cache
 from app.core.config import (
     CACHE_TTL_DAY, CACHE_TTL_MONTH, CACHE_TTL_QUARTER, CACHE_TTL_SEMESTER,
-    CACHE_TTL_WEEK, CALDAV_MAX_RANGE_DAYS,
+    CACHE_TTL_WEEK, CALDAV_AUTH_MODE, CALDAV_MAX_RANGE_DAYS,
+    CALDAV_USER_URL_TEMPLATE,
 )
 from app.integrations.calendar.base import CalendarAuthError, CalendarProviderError
 from app.integrations.calendar.nextcloud import NextcloudCalDAVAdapter
@@ -142,6 +143,68 @@ async def list_events(
         return Response(status_code=304, headers=dict(response.headers))
 
     return payload
+
+
+@router.get("/_diag")
+async def calendar_diag(
+    authorization: Annotated[str | None, Header()] = None,
+    db: Session = Depends(get_db),
+):
+    """Temporary connectivity diagnostic — admin only.
+
+    Returns CalDAV auth config, resolved user URL, and the result (or typed
+    error) of list_calendars() so an admin can pinpoint why /events returns [].
+    Remove this endpoint once the production issue is resolved.
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    user = await get_current_user(authorization, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    access_token = _strip_bearer(authorization)
+    resolved_url = CALDAV_USER_URL_TEMPLATE.format(nc_user_id=user.nc_user_id)
+
+    calendars_result = None
+    error_type = None
+    error_detail = None
+
+    try:
+        adapter = NextcloudCalDAVAdapter(
+            nc_user_id=user.nc_user_id,
+            access_token=access_token,
+        )
+        refs = await adapter.list_calendars()
+        calendars_result = [
+            {"id": r.id, "name": r.name, "color": r.color, "is_owner": r.is_owner}
+            for r in refs
+        ]
+    except CalendarAuthError as exc:
+        error_type = "CalendarAuthError"
+        error_detail = str(exc)
+    except CalendarProviderError as exc:
+        error_type = "CalendarProviderError"
+        error_detail = str(exc)
+    except Exception as exc:  # noqa: BLE001
+        error_type = type(exc).__name__
+        error_detail = str(exc)
+
+    return {
+        "caldav_auth_mode": CALDAV_AUTH_MODE,
+        "caldav_user_url": resolved_url,
+        "nc_user_id": user.nc_user_id,
+        # OCS ping succeeded (get_current_user passed); expiry not stored in DB.
+        "nc_token_status": "ocs_ping_ok — expiry unknown (not persisted)",
+        "list_calendars": {
+            "ok": calendars_result is not None,
+            "count": len(calendars_result) if calendars_result is not None else None,
+            "calendars": calendars_result,
+            "error_type": error_type,
+            "error_detail": error_detail,
+        },
+    }
 
 
 @router.post("/cache/invalidate", response_model=InvalidateResponse)
