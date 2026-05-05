@@ -97,12 +97,10 @@ class PerformanceReportService:
             TeamsSummaryBuilder().build(workbook, ctx)
 
             if request.options.include_team_sheets:
-                for team in teams:
-                    TeamDetailBuilder(team.team_id).build(workbook, ctx)
+                TeamDetailBuilder().build(workbook, ctx)
 
             if request.options.include_individual_sheets:
-                for emp in employees:
-                    EmployeeDetailBuilder(emp.user_id).build(workbook, ctx)
+                EmployeeDetailBuilder().build(workbook, ctx)
 
             workbook.close()
         except ReportGenerationError:
