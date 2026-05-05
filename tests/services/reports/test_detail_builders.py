@@ -62,7 +62,7 @@ def _org(req: ReportRequest) -> OrgMetricsDTO:
         period_label="Semana actual",
         generated_at=datetime(2026, 5, 5, 9, 0, 0),
         generated_by="Test",
-        scope_label="FULL",
+        scope_label="full",
     )
 
 

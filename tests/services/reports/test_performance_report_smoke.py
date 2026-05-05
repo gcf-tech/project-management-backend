@@ -391,11 +391,11 @@ class TestUnauthorizedRole403:
                     "/api/v1/reports/performance/export",
                     json={
                         "period": {
-                            "type": "CUSTOM",
+                            "type": "custom",
                             "start_date": "2026-04-01",
                             "end_date": "2026-04-30",
                         },
-                        "scope": {"mode": "FULL"},
+                        "scope": {"mode": "full"},
                         "options": {},
                     },
                 )

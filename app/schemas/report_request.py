@@ -12,16 +12,16 @@ _BOGOTA = ZoneInfo("America/Bogota")
 
 
 class PeriodType(str, Enum):
-    WEEK = "WEEK"
-    MONTH = "MONTH"
-    QUARTER = "QUARTER"
-    CUSTOM = "CUSTOM"
+    WEEK = "week"
+    MONTH = "month"
+    QUARTER = "quarter"
+    CUSTOM = "custom"
 
 
 class ScopeMode(str, Enum):
-    FULL = "FULL"
-    TEAMS = "TEAMS"
-    EMPLOYEES = "EMPLOYEES"
+    FULL = "full"
+    TEAMS = "teams"
+    EMPLOYEES = "employees"
 
 
 class PeriodFilter(BaseModel):
@@ -50,8 +50,8 @@ class ReportRequest(BaseModel):
         from pydantic import ValidationError
         try:
             ReportRequest(
-                period={"type": "CUSTOM", "start_date": "2025-04-30", "end_date": "2025-04-01"},
-                scope={"mode": "FULL"},
+                period={"type": "custom", "start_date": "2025-04-30", "end_date": "2025-04-01"},
+                scope={"mode": "full"},
                 options={},
             )
         except ValidationError as exc:
