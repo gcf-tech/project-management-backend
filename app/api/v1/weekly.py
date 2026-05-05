@@ -1,4 +1,4 @@
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 from typing import Optional, Annotated, Literal, List
 from uuid import uuid4
 import hashlib
@@ -23,6 +23,7 @@ from app.services.weekly_recurrence import (
     is_virtual_id,
     parse_virtual_id,
 )
+from app.core.datetime_utils import utc_now
 
 router = APIRouter()
 
@@ -159,7 +160,7 @@ async def update_preferences(
         prefs.week_start_day = data.week_start_day
         prefs.week_end_day = data.week_end_day
         prefs.calendar_view = calendar_view
-        prefs.updated_at = datetime.utcnow()
+        prefs.updated_at = utc_now()
     else:
         prefs = UserPreferences(
             user_id=user.id,
@@ -244,11 +245,11 @@ async def get_blocks(
             WeeklyBlock.week_start <= week_end,
             or_(
                 WeeklyBlock.dtstart.is_(None),
-                WeeklyBlock.dtstart <= datetime.combine(week_end, time.max),
+                WeeklyBlock.dtstart <= datetime.combine(week_end, time.max, tzinfo=timezone.utc),
             ),
             or_(
                 WeeklyBlock.rrule_until.is_(None),
-                WeeklyBlock.rrule_until >= datetime.combine(week_start, time.min),
+                WeeklyBlock.rrule_until >= datetime.combine(week_start, time.min, tzinfo=timezone.utc),
             ),
         )
         .all()
@@ -291,7 +292,7 @@ async def get_unified_blocks(
 
     end_date = week_start + timedelta(days=6)
     blocks = get_unified_week(db, user.id, week_start, end_date)
-    return [b.model_dump() for b in blocks]
+    return [b.model_dump(mode="json") for b in blocks]
 
 
 @router.post("/blocks", status_code=201)
@@ -399,7 +400,7 @@ async def patch_block(
             if field in ("title", "color") and block.block_type != "personal":
                 continue
             setattr(block, field, value)
-        block.updated_at = datetime.utcnow()
+        block.updated_at = utc_now()
 
     if is_virtual_id(block_id):
         series_id, week_start = parse_virtual_id(block_id)
@@ -637,7 +638,7 @@ def _compute_dtstart(week_start: date, day_of_week: int, start_t: time) -> datet
     py_wd = _JS_TO_PY_WEEKDAY.get(day_of_week, 0)
     offset = (py_wd - week_start.weekday() + 7) % 7
     occurrence_date = week_start + timedelta(days=offset)
-    return datetime.combine(occurrence_date, start_t)
+    return datetime.combine(occurrence_date, start_t, tzinfo=timezone.utc)
 
 
 def _extract_rrule_until(rrule_string: str) -> Optional[datetime]:
@@ -647,8 +648,8 @@ def _extract_rrule_until(rrule_string: str) -> Optional[datetime]:
             raw = part[6:].rstrip("Z")
             try:
                 if "T" in raw:
-                    return datetime.strptime(raw, "%Y%m%dT%H%M%S")
-                return datetime.strptime(raw, "%Y%m%d")
+                    return datetime.strptime(raw, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+                return datetime.strptime(raw, "%Y%m%d").replace(tzinfo=timezone.utc)
             except ValueError:
                 return None
     return None

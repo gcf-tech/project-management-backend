@@ -9,6 +9,7 @@ from app.db.models import User, Team, Skill, UserSkill, SkillEndorsement
 from app.schemas.user_schemas import UserUpdate, TeamCreate, TeamUpdate, SkillScore, SkillEndorsementCreate
 from app.services.nextcloud_svc import fetch_deck_boards, fetch_deck_cards
 from app.core.security import get_nc_user_groups
+from app.core.datetime_utils import utc_now
 
 router = APIRouter()
 
@@ -350,7 +351,7 @@ async def update_user(
         elif hasattr(target, field):
             setattr(target, field, value)
 
-    target.updated_at = datetime.utcnow()
+    target.updated_at = utc_now()
     db.commit()
     return {"success": True}
 
@@ -429,7 +430,7 @@ async def update_team(
         elif hasattr(team, field):
             setattr(team, field, value)
 
-    team.updated_at = datetime.utcnow()
+    team.updated_at = utc_now()
     db.commit()
     return {"success": True}
 
@@ -500,7 +501,7 @@ async def sync_user_from_nc(
             target.team_id = None
 
         target.role = role
-        target.updated_at = datetime.utcnow()
+        target.updated_at = utc_now()
         db.commit()
         db.refresh(target)
 

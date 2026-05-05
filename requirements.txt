@@ -3,6 +3,7 @@ uvicorn
 pydantic
 httpx
 sqlalchemy
+alembic
 pymysql
 cryptography
 # Calendar integration (Nextcloud CalDAV)

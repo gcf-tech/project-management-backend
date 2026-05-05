@@ -1,13 +1,10 @@
-# TECH DEBT: all DateTime columns below use naive DateTime (no timezone=True).
-# They should be migrated to DateTime(timezone=True) so the ORM stores and
-# returns timezone-aware values. Migration is deferred — see biz-hours ticket.
-from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean,
     Enum, Date, DateTime, DECIMAL, ForeignKey, CheckConstraint, Time, Index, JSON
 )
 from sqlalchemy.orm import relationship
 from app.db.database import Base
+from app.core.datetime_utils import utc_now
 
 
 class Team(Base):
@@ -18,8 +15,8 @@ class Team(Base):
     leader_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     parent_team_id = Column(Integer, ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     is_tech_team = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     members = relationship("User", back_populates="team", foreign_keys="User.team_id")
     leader = relationship("User", foreign_keys=[leader_id], post_update=True)
@@ -37,8 +34,8 @@ class User(Base):
     team_id = Column(Integer, ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     role = Column(Enum("member", "leader", "admin"), default="member")
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     team = relationship("Team", back_populates="members", foreign_keys=[team_id])
     tasks = relationship("Task", back_populates="owner", foreign_keys="Task.owner_id")
@@ -59,16 +56,16 @@ class Task(Base):
     priority = Column(Enum("low", "medium", "high", "urgent"), nullable=True)
     start_date = Column(Date, nullable=True)
     deadline = Column(Date, nullable=True)
-    completed_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     progress = Column(Integer, default=0)
     time_spent = Column(Integer, default=0)
     difficulty = Column(Integer, nullable=True)
     difficulty_reason = Column(Text, nullable=True)
     was_difficult = Column(Boolean, default=False)
     deck_card_id = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    deleted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     deleted_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     owner = relationship("User", back_populates="tasks", foreign_keys=[owner_id])
@@ -94,12 +91,12 @@ class Activity(Base):
     priority = Column(Enum("low", "medium", "high", "urgent"), nullable=True)
     start_date = Column(Date, nullable=True)
     deadline = Column(Date, nullable=True)
-    completed_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     progress = Column(Integer, default=0)
     time_spent = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    deleted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     deleted_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     owner = relationship("User", back_populates="activities", foreign_keys=[owner_id])
@@ -116,7 +113,7 @@ class Subtask(Base):
     text = Column(String(500), nullable=False)
     completed = Column(Boolean, default=False)
     time_spent = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
 
     task = relationship("Task", back_populates="subtasks")
 
@@ -130,10 +127,10 @@ class TimeLog(Base):
     activity_id = Column(String(50), ForeignKey("activities.id", ondelete="CASCADE"), nullable=True)
     log_date = Column(Date, nullable=False)
     seconds = Column(Integer, default=0)
-    start_at = Column(DateTime, nullable=True)
+    start_at = Column(DateTime(timezone=True), nullable=True)
     client_op_id = Column(String(64), unique=True, nullable=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     user = relationship("User")
     task = relationship("Task", back_populates="time_logs")
@@ -155,7 +152,7 @@ class Observation(Base):
     activity_id = Column(String(50), ForeignKey("activities.id", ondelete="CASCADE"), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     text = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
 
     task = relationship("Task", back_populates="observations")
     activity = relationship("Activity", back_populates="observations")
@@ -170,7 +167,7 @@ class Skill(Base):
     category = Column(Enum("frontend", "backend", "devops", "data", "design", "soft_skill", "other"), default="other")
     description = Column(String(255), nullable=True)
     is_tech_only = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
 
 
 class UserSkill(Base):
@@ -182,7 +179,7 @@ class UserSkill(Base):
     self_score = Column(Integer, default=5)
     avg_endorsement_score = Column(DECIMAL(3, 1), default=0)
     total_endorsements = Column(Integer, default=0)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     user = relationship("User", back_populates="skills")
     skill = relationship("Skill")
@@ -201,7 +198,7 @@ class SkillEndorsement(Base):
     endorsed_by = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     score = Column(Integer, nullable=False)
     comment = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
 
     user_skill = relationship("UserSkill", back_populates="endorsements")
     endorser = relationship("User")
@@ -218,7 +215,7 @@ class UserPreferences(Base):
     week_start_day = Column(Integer, default=1, nullable=False)
     week_end_day = Column(Integer, default=5, nullable=False)
     calendar_view = Column(String(20), nullable=False, default="week")
-    updated_at = Column(DateTime, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     user = relationship("User")
 
@@ -243,12 +240,12 @@ class WeeklyBlock(Base):
     series_id = Column(String(36), nullable=True)
     # ── RRule columns (Phase 3) ──────────────────────────────────────────────
     rrule_string    = Column(String(500), nullable=True)
-    dtstart         = Column(DateTime, nullable=True)
-    rrule_until     = Column(DateTime, nullable=True)
+    dtstart         = Column(DateTime(timezone=True), nullable=True)
+    rrule_until     = Column(DateTime(timezone=True), nullable=True)
     parent_block_id = Column(Integer, ForeignKey("weekly_blocks.id", ondelete="SET NULL"), nullable=True)
     exception_dates = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     user = relationship("User")
     task = relationship("Task")
