@@ -12,3 +12,5 @@ recurring-ical-events>=2.2.0
 cachetools>=5.3.0
 # Optional shared-cache backend (auto-selected when REDIS_URL is set)
 redis>=5.0.0
+# Excel export for performance reports
+xlsxwriter==3.2.0
