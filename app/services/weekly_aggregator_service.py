@@ -23,6 +23,32 @@ def _duration_minutes(start: time, end: time) -> int:
     return max(1, int((end_dt - start_dt).total_seconds() // 60))
 
 
+def _resolve_log_start_at(log: TimeLog) -> datetime | None:
+    if log.start_at is not None:
+        if log.start_at.tzinfo is not None and log.start_at.utcoffset() is not None:
+            return log.start_at.astimezone(timezone.utc)
+        return log.start_at.replace(tzinfo=timezone.utc)
+
+    if log.log_date is None:
+        return None
+
+    anchor_time = time(9, 0, 0)
+    if log.created_at is not None:
+        created_utc = (
+            log.created_at.astimezone(timezone.utc)
+            if log.created_at.tzinfo is not None and log.created_at.utcoffset() is not None
+            else log.created_at.replace(tzinfo=timezone.utc)
+        )
+        if created_utc.date() == log.log_date:
+            seconds = log.seconds or 0
+            if seconds > 0:
+                anchor_time = (created_utc - timedelta(seconds=seconds)).time()
+            else:
+                anchor_time = created_utc.time()
+
+    return datetime.combine(log.log_date, anchor_time, tzinfo=timezone.utc)
+
+
 def get_unified_week(
     db: Session,
     user_id: int,
@@ -89,27 +115,9 @@ def get_unified_week(
     )
 
     for log in task_logs:
-        if log.start_at is not None:
-            start_at = (
-                log.start_at.astimezone(timezone.utc)
-                if log.start_at.tzinfo is not None and log.start_at.utcoffset() is not None
-                else log.start_at.replace(tzinfo=timezone.utc)
-            )
-        elif log.created_at is not None and log.seconds > 0:
-            created = (
-                log.created_at.astimezone(timezone.utc)
-                if log.created_at.tzinfo is not None and log.created_at.utcoffset() is not None
-                else log.created_at.replace(tzinfo=timezone.utc)
-            )
-            start_at = created - timedelta(seconds=log.seconds)
-        elif log.created_at is not None:
-            start_at = (
-                log.created_at.astimezone(timezone.utc)
-                if log.created_at.tzinfo is not None and log.created_at.utcoffset() is not None
-                else log.created_at.replace(tzinfo=timezone.utc)
-            )
-        else:
-            continue  # start_at y created_at son NULL — no renderizar
+        start_at = _resolve_log_start_at(log)
+        if start_at is None:
+            continue
 
         result.append(WeeklyBlockUnified(
             id=f"task-log-{log.id}",
@@ -141,27 +149,9 @@ def get_unified_week(
     )
 
     for log in activity_logs:
-        if log.start_at is not None:
-            start_at = (
-                log.start_at.astimezone(timezone.utc)
-                if log.start_at.tzinfo is not None and log.start_at.utcoffset() is not None
-                else log.start_at.replace(tzinfo=timezone.utc)
-            )
-        elif log.created_at is not None and log.seconds > 0:
-            created = (
-                log.created_at.astimezone(timezone.utc)
-                if log.created_at.tzinfo is not None and log.created_at.utcoffset() is not None
-                else log.created_at.replace(tzinfo=timezone.utc)
-            )
-            start_at = created - timedelta(seconds=log.seconds)
-        elif log.created_at is not None:
-            start_at = (
-                log.created_at.astimezone(timezone.utc)
-                if log.created_at.tzinfo is not None and log.created_at.utcoffset() is not None
-                else log.created_at.replace(tzinfo=timezone.utc)
-            )
-        else:
-            continue  # start_at y created_at son NULL — no renderizar
+        start_at = _resolve_log_start_at(log)
+        if start_at is None:
+            continue
 
         result.append(WeeklyBlockUnified(
             id=f"activity-log-{log.id}",
