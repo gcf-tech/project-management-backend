@@ -132,6 +132,7 @@ def seeded(db):
             activity_id=act_id,
             log_date=date(2026, 4, 15),
             seconds=secs,
+            start_at=datetime(2026, 4, 15, 0, 0),
         ))
 
     # ── Tasks for User 1: 4 completed + 1 open (in period) ───────────────────
