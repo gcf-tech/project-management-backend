@@ -40,22 +40,14 @@ logger = logging.getLogger(__name__)
 class NextcloudCalDAVAdapter(CalendarProvider):
     """One adapter instance per (user, request). NEVER cache or share."""
 
-    def __init__(
-        self,
-        *,
-        nc_user_id: str,
-        access_token: str = "",
-        app_password: str = "",
-    ) -> None:
-        if not nc_user_id:
-            raise CalendarAuthError("nc_user_id is required")
-        if not access_token and not app_password:
-            raise CalendarAuthError("either access_token or app_password is required")
-        if access_token and app_password:
-            raise CalendarAuthError("provide either access_token or app_password, not both")
+    def __init__(self, *, nc_user_id: str, access_token: str) -> None:
+        if not nc_user_id or not access_token:
+            # Fail fast — never silently fall back to anonymous calls,
+            # which on Nextcloud would either 401 or (worse) return public
+            # calendars belonging to another principal.
+            raise CalendarAuthError("nc_user_id and access_token are required")
         self._nc_user_id   = nc_user_id
         self._access_token = access_token
-        self._app_password = app_password
         self._user_url     = CALDAV_USER_URL_TEMPLATE.format(nc_user_id=nc_user_id)
         self._client: Optional[caldav.DAVClient] = None
         self._principal: Optional[caldav.Principal] = None
@@ -63,6 +55,12 @@ class NextcloudCalDAVAdapter(CalendarProvider):
     # ── auth ────────────────────────────────────────────────────────────────
 
     def _build_client(self) -> caldav.DAVClient:
+        """Construct the underlying CalDAV client.
+
+        `bearer` mode passes the OAuth2 access token in `Authorization`.
+        `app_password` is reserved for future use; it would read an
+        encrypted token from the DB (not implemented here — see ADR-005).
+        """
         if CALDAV_AUTH_MODE == "bearer":
             # caldav>=1.3 supports a `headers=` kwarg that is merged into
             # every request, so we can inject Authorization without ever
@@ -73,10 +71,12 @@ class NextcloudCalDAVAdapter(CalendarProvider):
                 timeout=CALDAV_TIMEOUT_S,
             )
         if CALDAV_AUTH_MODE == "app_password":
+            # The token in this case is a plain App Password fetched (and
+            # decrypted) by the caller before constructing the adapter.
             return caldav.DAVClient(
                 url=self._user_url,
                 username=self._nc_user_id,
-                password=self._app_password,
+                password=self._access_token,
                 timeout=CALDAV_TIMEOUT_S,
             )
         raise CalendarProviderError(

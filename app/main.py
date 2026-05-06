@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
-from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router, calendar, reports, settings
+from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router, calendar, reports
 
 
 @asynccontextmanager
@@ -41,7 +41,6 @@ app.include_router(metrics.router, prefix="/api/dashboard")
 app.include_router(teams.router,   prefix="/api")
 app.include_router(weekly.router,       prefix="/api/weekly")
 app.include_router(calendar.router,     prefix="/api/calendar")
-app.include_router(settings.router,     prefix="/api/settings")
 app.include_router(config_router.router, prefix="/config")
 app.include_router(reports.router,      prefix="/api/v1")
 
