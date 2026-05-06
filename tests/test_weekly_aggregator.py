@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -100,7 +100,7 @@ def test_activity_log_source_correct(seed):
     assert result[0].title == "Reunión equipo"
 
 
-def test_no_start_at_falls_back_to_midnight(seed):
+def test_no_start_at_falls_back_to_9am(seed):
     monday = _monday()
     tuesday = monday + timedelta(days=1)
     log = TimeLog(
@@ -109,6 +109,8 @@ def test_no_start_at_falls_back_to_midnight(seed):
         log_date=tuesday,
         seconds=7200,
         start_at=None,
+        # created_at on a different day → cross-day fallback → 09:00 UTC
+        created_at=datetime(monday.year, monday.month, monday.day, 10, 0, 0, tzinfo=timezone.utc),
     )
     seed.add(log)
     seed.commit()
@@ -116,8 +118,8 @@ def test_no_start_at_falls_back_to_midnight(seed):
     result = get_unified_week(seed, user_id=1, start_date=monday, end_date=monday + timedelta(days=6))
 
     assert len(result) == 1
-    assert result[0].start_at.hour == 0
-    assert result[0].start_at.minute == 0
+    assert result[0].start_at.hour == 9
+    assert result[0].start_at.date() == tuesday
 
 
 def test_results_ordered_by_start_at(seed):
