@@ -100,7 +100,7 @@ def test_activity_log_source_correct(seed):
     assert result[0].title == "Reunión equipo"
 
 
-def test_no_start_at_falls_back_to_9am(seed):
+def test_start_at_9am_is_preserved(seed):
     monday = _monday()
     tuesday = monday + timedelta(days=1)
     log = TimeLog(
@@ -108,9 +108,7 @@ def test_no_start_at_falls_back_to_9am(seed):
         task_id="task-1",
         log_date=tuesday,
         seconds=7200,
-        start_at=None,
-        # created_at on a different day → cross-day fallback → 09:00 UTC
-        created_at=datetime(monday.year, monday.month, monday.day, 10, 0, 0, tzinfo=timezone.utc),
+        start_at=datetime(tuesday.year, tuesday.month, tuesday.day, 9, 0, 0),
     )
     seed.add(log)
     seed.commit()

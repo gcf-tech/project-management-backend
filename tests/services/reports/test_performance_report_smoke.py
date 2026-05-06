@@ -189,8 +189,6 @@ def seeded(db):
     db.flush()
 
     # ── Time logs (100: 4 distinct dates × 25 tasks) ──────────────────────────
-    # Unique constraint: (user_id, task_id, log_date) — different task_id per
-    # row means no conflict even when the same user owns multiple tasks.
     _dates = [date(2026, 4, d) for d in range(1, 5)]  # Apr 1–4
     for task in tasks[:25]:
         for d in _dates:
@@ -199,6 +197,7 @@ def seeded(db):
                 task_id=task.id,
                 log_date=d,
                 seconds=3600,
+                start_at=datetime(d.year, d.month, d.day),
             ))
     db.flush()
     db.commit()

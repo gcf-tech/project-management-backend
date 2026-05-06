@@ -127,7 +127,8 @@ class TimeLog(Base):
     activity_id = Column(String(50), ForeignKey("activities.id", ondelete="CASCADE"), nullable=True)
     log_date = Column(Date, nullable=False)
     seconds = Column(Integer, default=0)
-    start_at = Column(DateTime(timezone=True), nullable=True)
+    start_at = Column(DateTime(timezone=True), nullable=False)
+    end_at = Column(DateTime(timezone=True), nullable=True)
     client_op_id = Column(String(64), unique=True, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
@@ -137,8 +138,7 @@ class TimeLog(Base):
     activity = relationship("Activity", back_populates="time_logs")
 
     __table_args__ = (
-        Index("uq_time_logs_user_task_date", "user_id", "task_id", "log_date", unique=True),
-        Index("uq_time_logs_user_activity_date", "user_id", "activity_id", "log_date", unique=True),
+        Index("idx_time_logs_user_logdate", "user_id", "log_date"),
         Index("idx_time_logs_user_task_logdate", "user_id", "task_id", "log_date"),
         Index("idx_time_logs_user_activity_logdate", "user_id", "activity_id", "log_date"),
     )
