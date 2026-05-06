@@ -20,7 +20,9 @@ import logging
 from datetime import date, timedelta
 from typing import Annotated, Optional
 
+from cryptography.exceptions import InvalidTag
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_db
@@ -30,6 +32,7 @@ from app.core.config import (
     CACHE_TTL_WEEK, CALDAV_AUTH_MODE, CALDAV_MAX_RANGE_DAYS,
     CALDAV_USER_URL_TEMPLATE,
 )
+from app.core.crypto import decrypt_secret
 from app.integrations.calendar.base import CalendarAuthError, CalendarProviderError
 from app.integrations.calendar.nextcloud import NextcloudCalDAVAdapter
 from app.schemas.calendar import (
@@ -78,12 +81,10 @@ async def list_events(
             detail=f"range exceeds {CALDAV_MAX_RANGE_DAYS} day limit",
         )
 
-    # Strip the "Bearer " prefix — CalDAV adapter re-prefixes when calling.
-    access_token = _strip_bearer(authorization)
-    adapter      = NextcloudCalDAVAdapter(
-        nc_user_id=user.nc_user_id,
-        access_token=access_token,
-    )
+    adapter = _build_adapter(user, authorization)
+    if isinstance(adapter, JSONResponse):
+        return adapter  # 412 — credential missing or decrypt failed
+
     repo = EventRepository(provider=adapter)
     query = EventQuery(
         nc_user_id=user.nc_user_id,
@@ -96,16 +97,21 @@ async def list_events(
     try:
         result = await repo.get_events(query)
     except CalendarAuthError as e:
-        # 401 lets the frontend trigger a token refresh + retry.
+        if CALDAV_AUTH_MODE == "app_password":
+            logger.info("[calendar] app_password invalid user=%s: %s", user.nc_user_id, e)
+            return JSONResponse(
+                status_code=412,
+                content={
+                    "error": "caldav_credential_invalid",
+                    "message": "App Password expirado o inválido. Reconfigure en Ajustes.",
+                },
+            )
+        # bearer mode: 401 lets the frontend trigger a token refresh + retry.
         logger.info("[calendar] auth error for user=%s: %s", user.nc_user_id, e)
         raise HTTPException(status_code=401, detail="CalDAV authentication failed") from e
     except CalendarProviderError as e:
-        # 503 instead of 500 — provider is down, app itself is fine.
         logger.warning("[calendar] provider error for user=%s: %s", user.nc_user_id, e)
-        raise HTTPException(
-            status_code=503,
-            detail="Calendar provider unavailable, try again shortly",
-        ) from e
+        raise HTTPException(status_code=502, detail="Calendar provider unavailable") from e
 
     if prefetch:
         # Fire-and-forget: warm the next window so the user can click "next"
@@ -164,19 +170,29 @@ async def calendar_diag(
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
 
-    access_token = _strip_bearer(authorization)
     resolved_url = CALDAV_USER_URL_TEMPLATE.format(nc_user_id=user.nc_user_id)
-
     calendars_result = None
     error_type = None
     error_detail = None
 
+    diag_adapter = _build_adapter(user, authorization)
+    if isinstance(diag_adapter, JSONResponse):
+        return {
+            "caldav_auth_mode": CALDAV_AUTH_MODE,
+            "caldav_user_url": resolved_url,
+            "nc_user_id": user.nc_user_id,
+            "nc_token_status": "app_password_not_configured",
+            "list_calendars": {
+                "ok": False,
+                "count": None,
+                "calendars": None,
+                "error_type": "CalDAVCredentialMissing",
+                "error_detail": "No App Password configured. Set up in Settings.",
+            },
+        }
+
     try:
-        adapter = NextcloudCalDAVAdapter(
-            nc_user_id=user.nc_user_id,
-            access_token=access_token,
-        )
-        refs = await adapter.list_calendars()
+        refs = await diag_adapter.list_calendars()
         calendars_result = [
             {"id": r.id, "name": r.name, "color": r.color, "is_owner": r.is_owner}
             for r in refs
@@ -191,12 +207,16 @@ async def calendar_diag(
         error_type = type(exc).__name__
         error_detail = str(exc)
 
+    nc_token_status = (
+        f"app_password_configured (set_at={user.nc_caldav_token_set_at})"
+        if CALDAV_AUTH_MODE == "app_password"
+        else "ocs_ping_ok — expiry unknown (not persisted)"
+    )
     return {
         "caldav_auth_mode": CALDAV_AUTH_MODE,
         "caldav_user_url": resolved_url,
         "nc_user_id": user.nc_user_id,
-        # OCS ping succeeded (get_current_user passed); expiry not stored in DB.
-        "nc_token_status": "ocs_ping_ok — expiry unknown (not persisted)",
+        "nc_token_status": nc_token_status,
         "list_calendars": {
             "ok": calendars_result is not None,
             "count": len(calendars_result) if calendars_result is not None else None,
@@ -232,6 +252,48 @@ async def invalidate_cache(
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
+
+def _build_adapter(user, authorization: str | None):
+    """Return a NextcloudCalDAVAdapter for *user*, or a JSONResponse(412) on error.
+
+    In app_password mode the encrypted credential is read from the DB and
+    decrypted here before being handed to the adapter.  In bearer mode the
+    raw OAuth2 access token is extracted from the Authorization header.
+    """
+    if CALDAV_AUTH_MODE == "app_password":
+        if not user.has_caldav_credential():
+            return JSONResponse(
+                status_code=412,
+                content={
+                    "error": "caldav_credential_missing",
+                    "message": "Configura tu App Password de Nextcloud en Ajustes.",
+                },
+            )
+        try:
+            credential = decrypt_secret(
+                user.nc_caldav_token_ciphertext,
+                user.nc_caldav_token_iv,
+            )
+        except InvalidTag:
+            logger.error("[calendar] credential decrypt failed user=%s", user.nc_user_id)
+            return JSONResponse(
+                status_code=412,
+                content={
+                    "error": "caldav_credential_invalid",
+                    "message": "Error en la credencial almacenada. Reconfigure en Ajustes.",
+                },
+            )
+        return NextcloudCalDAVAdapter(
+            nc_user_id=user.nc_user_id,
+            app_password=credential,
+        )
+
+    access_token = _strip_bearer(authorization or "")
+    return NextcloudCalDAVAdapter(
+        nc_user_id=user.nc_user_id,
+        access_token=access_token,
+    )
+
 
 def _strip_bearer(authorization: str) -> str:
     """Pull the raw access token out of an `Authorization: Bearer …` header."""
