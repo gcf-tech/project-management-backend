@@ -1,6 +1,7 @@
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean,
-    Enum, Date, DateTime, DECIMAL, ForeignKey, CheckConstraint, Time, Index, JSON
+    Enum, Date, DateTime, DECIMAL, ForeignKey, CheckConstraint, Time, Index, JSON,
+    LargeBinary,
 )
 from sqlalchemy.orm import relationship
 from app.db.database import Base
@@ -34,8 +35,19 @@ class User(Base):
     team_id = Column(Integer, ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     role = Column(Enum("member", "leader", "admin"), default="member")
     is_active = Column(Boolean, default=True)
+    # CalDAV App Password stored encrypted at rest (AES-256-GCM).
+    # Managed by app/api/v1/settings.py; key in CALDAV_ENCRYPTION_KEY env var.
+    nc_caldav_token_ciphertext = Column(LargeBinary(1024), nullable=True)
+    nc_caldav_token_iv         = Column(LargeBinary(16),   nullable=True)
+    nc_caldav_token_set_at     = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    def has_caldav_credential(self) -> bool:
+        return (
+            self.nc_caldav_token_ciphertext is not None
+            and self.nc_caldav_token_iv is not None
+        )
 
     team = relationship("Team", back_populates="members", foreign_keys=[team_id])
     tasks = relationship("Task", back_populates="owner", foreign_keys="Task.owner_id")
