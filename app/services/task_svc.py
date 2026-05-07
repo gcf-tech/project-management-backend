@@ -1,9 +1,20 @@
 from datetime import datetime, date, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.db.models import Task, Activity, Subtask, TimeLog, Observation, User
 from app.core.datetime_utils import to_rfc3339_z, utc_now, ensure_aware_utc
+
+APP_TZ = ZoneInfo("America/Bogota")
+
+
+def _today_local() -> date:
+    return datetime.now(APP_TZ).date()
+
+
+def _default_start_at(start_at: Optional[datetime]) -> datetime:
+    return ensure_aware_utc(start_at) if start_at is not None else utc_now()
 
 
 def serialize_task(task: Task) -> dict:
@@ -98,7 +109,7 @@ def record_time_on_task(
     feedback: Optional[dict],
     start_at: Optional[datetime] = None,
 ) -> Task:
-    today = datetime.now(timezone.utc).date()
+    today = _today_local()
     time_log = db.query(TimeLog).filter(
         TimeLog.task_id == task.id,
         TimeLog.log_date == today,
@@ -113,29 +124,38 @@ def record_time_on_task(
                 db.delete(time_log)
             else:
                 time_log.seconds = new_seconds
+                if time_log.end_at is None:
+                    time_log.end_at = utc_now()
         else:
+            _now = utc_now()
+            _start = ensure_aware_utc(start_at) if start_at is not None else _now
             db.add(
                 TimeLog(
                     user_id=user_id,
                     task_id=task.id,
                     log_date=today,
                     seconds=absolute_time,
-                    start_at=ensure_aware_utc(start_at) if start_at is not None else None,
+                    start_at=_start,
+                    end_at=_now,
                 )
             )
     else:
         if time_log:
             time_log.seconds += time_spent
-            # preserve original start_at; only set if not already recorded
             if time_log.start_at is None and start_at is not None:
                 time_log.start_at = ensure_aware_utc(start_at)
+            if time_log.end_at is None:
+                time_log.end_at = utc_now()
         else:
+            _now = utc_now()
+            _start = ensure_aware_utc(start_at) if start_at is not None else _now
             db.add(TimeLog(
                 user_id=user_id,
                 task_id=task.id,
                 log_date=today,
                 seconds=time_spent,
-                start_at=ensure_aware_utc(start_at) if start_at is not None else None,
+                start_at=_start,
+                end_at=_now,
             ))
 
     db.flush()
@@ -168,7 +188,7 @@ def record_time_on_activity(
     feedback: Optional[dict],
     start_at: Optional[datetime] = None,
 ) -> Activity:
-    today = datetime.now(timezone.utc).date()
+    today = _today_local()
     time_log = db.query(TimeLog).filter(
         TimeLog.activity_id == activity.id,
         TimeLog.log_date == today,
@@ -183,14 +203,19 @@ def record_time_on_activity(
                 db.delete(time_log)
             else:
                 time_log.seconds = new_seconds
+                if time_log.end_at is None:
+                    time_log.end_at = utc_now()
         else:
+            _now = utc_now()
+            _start = ensure_aware_utc(start_at) if start_at is not None else _now
             db.add(
                 TimeLog(
                     user_id=user_id,
                     activity_id=activity.id,
                     log_date=today,
                     seconds=absolute_time,
-                    start_at=ensure_aware_utc(start_at) if start_at is not None else None,
+                    start_at=_start,
+                    end_at=_now,
                 )
             )
     else:
@@ -198,13 +223,18 @@ def record_time_on_activity(
             time_log.seconds += time_spent
             if time_log.start_at is None and start_at is not None:
                 time_log.start_at = ensure_aware_utc(start_at)
+            if time_log.end_at is None:
+                time_log.end_at = utc_now()
         else:
+            _now = utc_now()
+            _start = ensure_aware_utc(start_at) if start_at is not None else _now
             db.add(TimeLog(
                 user_id=user_id,
                 activity_id=activity.id,
                 log_date=today,
                 seconds=time_spent,
-                start_at=ensure_aware_utc(start_at) if start_at is not None else None,
+                start_at=_start,
+                end_at=_now,
             ))
 
     db.flush()
