@@ -127,7 +127,7 @@ class TimeLog(Base):
     activity_id = Column(String(50), ForeignKey("activities.id", ondelete="CASCADE"), nullable=True)
     log_date = Column(Date, nullable=False)
     seconds = Column(Integer, default=0)
-    start_at = Column(DateTime(timezone=True), nullable=False)
+    start_at = Column(DateTime(timezone=True), nullable=True)
     end_at = Column(DateTime(timezone=True), nullable=True)
     client_op_id = Column(String(64), unique=True, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
