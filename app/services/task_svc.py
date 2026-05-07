@@ -127,6 +127,10 @@ def record_time_on_task(
                 if time_log.end_at is None:
                     time_log.end_at = utc_now()
         else:
+            # Bug fix: Calcular la diferencia real, no usar el absolute_time completo para un log diario
+            diff = absolute_time - (task.time_spent or 0)
+            log_seconds = diff if diff > 0 else time_spent
+
             _now = utc_now()
             _start = ensure_aware_utc(start_at) if start_at is not None else _now
             db.add(
@@ -134,7 +138,7 @@ def record_time_on_task(
                     user_id=user_id,
                     task_id=task.id,
                     log_date=today,
-                    seconds=absolute_time,
+                    seconds=log_seconds,
                     start_at=_start,
                     end_at=_now,
                 )
@@ -206,6 +210,10 @@ def record_time_on_activity(
                 if time_log.end_at is None:
                     time_log.end_at = utc_now()
         else:
+            # Bug fix: Calcular la diferencia real, no usar el absolute_time completo para un log diario
+            diff = absolute_time - (activity.time_spent or 0)
+            log_seconds = diff if diff > 0 else time_spent
+
             _now = utc_now()
             _start = ensure_aware_utc(start_at) if start_at is not None else _now
             db.add(
@@ -213,7 +221,7 @@ def record_time_on_activity(
                     user_id=user_id,
                     activity_id=activity.id,
                     log_date=today,
-                    seconds=absolute_time,
+                    seconds=log_seconds,
                     start_at=_start,
                     end_at=_now,
                 )
