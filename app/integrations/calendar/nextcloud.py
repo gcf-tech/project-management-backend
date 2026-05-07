@@ -211,9 +211,16 @@ def _ensure_utc(dt: datetime) -> datetime:
 def _extract_calendar_color(c: caldav.Calendar) -> Optional[str]:
     """Read the RFC 7986 / Apple CalDAV `calendar-color` property if set."""
     try:
-        props = c.get_properties([caldav.elements.ical.CalendarColor()])
+        # Usar la URI directa evita la dependencia estricta de 'caldav.elements.ical'
+        # que fue removida en versiones recientes de la librería.
+        if hasattr(caldav.elements, "ical"):
+            props = c.get_properties([caldav.elements.ical.CalendarColor()])
+        else:
+            props = c.get_properties(["http://apple.com/ns/ical/:calendar-color"])
+
         return next(iter(props.values()), None)
-    except DAVError:
+    except Exception as e:
+        logger.debug(f"[caldav] No se pudo extraer el color del calendario: {e}")
         return None
 
 
