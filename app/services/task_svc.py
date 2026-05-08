@@ -110,57 +110,74 @@ def record_time_on_task(
     start_at: Optional[datetime] = None,
 ) -> Task:
     today = _today_local()
-    time_log = db.query(TimeLog).filter(
-        TimeLog.task_id == task.id,
-        TimeLog.log_date == today,
-        TimeLog.user_id == user_id,
-    ).first()
+    _now = utc_now()
 
-    if absolute_time is not None:
+    if start_at is not None:
+        # Session-aware path: each unique sessionStartAt gets its own TimeLog row.
+        # Truncate microseconds for MySQL DATETIME(0) compatibility.
+        _start_aware = ensure_aware_utc(start_at).replace(microsecond=0)
+        time_log = db.query(TimeLog).filter(
+            TimeLog.task_id == task.id,
+            TimeLog.user_id == user_id,
+            TimeLog.start_at == _start_aware,
+        ).first()
         if time_log:
-            diff = absolute_time - task.time_spent
-            new_seconds = time_log.seconds + diff
-            if new_seconds <= 0:
-                db.delete(time_log)
-            else:
-                time_log.seconds = new_seconds
-                if time_log.end_at is None:
-                    time_log.end_at = utc_now()
+            time_log.seconds += time_spent
+            time_log.end_at = _now
         else:
-            # Bug fix: Calcular la diferencia real, no usar el absolute_time completo para un log diario
-            diff = absolute_time - (task.time_spent or 0)
-            log_seconds = diff if diff > 0 else time_spent
-
-            _now = utc_now()
-            _start = ensure_aware_utc(start_at) if start_at is not None else _now
-            db.add(
-                TimeLog(
+            _log_date = _start_aware.astimezone(APP_TZ).date()
+            db.add(TimeLog(
+                user_id=user_id,
+                task_id=task.id,
+                log_date=_log_date,
+                seconds=time_spent,
+                start_at=_start_aware,
+                end_at=_now,
+            ))
+    else:
+        # Legacy path (no start_at): merge into today's single log per task.
+        time_log = db.query(TimeLog).filter(
+            TimeLog.task_id == task.id,
+            TimeLog.log_date == today,
+            TimeLog.user_id == user_id,
+        ).first()
+        if absolute_time is not None:
+            if time_log:
+                diff = absolute_time - task.time_spent
+                new_seconds = time_log.seconds + diff
+                if new_seconds <= 0:
+                    db.delete(time_log)
+                else:
+                    time_log.seconds = new_seconds
+                    if time_log.end_at is None:
+                        time_log.end_at = _now
+            else:
+                diff = absolute_time - (task.time_spent or 0)
+                log_seconds = diff if diff > 0 else time_spent
+                db.add(TimeLog(
                     user_id=user_id,
                     task_id=task.id,
                     log_date=today,
                     seconds=log_seconds,
-                    start_at=_start,
+                    start_at=_now,
                     end_at=_now,
-                )
-            )
-    else:
-        if time_log:
-            time_log.seconds += time_spent
-            if time_log.start_at is None and start_at is not None:
-                time_log.start_at = ensure_aware_utc(start_at)
-            if time_log.end_at is None:
-                time_log.end_at = utc_now()
+                ))
         else:
-            _now = utc_now()
-            _start = ensure_aware_utc(start_at) if start_at is not None else _now
-            db.add(TimeLog(
-                user_id=user_id,
-                task_id=task.id,
-                log_date=today,
-                seconds=time_spent,
-                start_at=_start,
-                end_at=_now,
-            ))
+            if time_log:
+                time_log.seconds += time_spent
+                if time_log.start_at is None:
+                    time_log.start_at = _now
+                if time_log.end_at is None:
+                    time_log.end_at = _now
+            else:
+                db.add(TimeLog(
+                    user_id=user_id,
+                    task_id=task.id,
+                    log_date=today,
+                    seconds=time_spent,
+                    start_at=_now,
+                    end_at=_now,
+                ))
 
     db.flush()
     task = _recalc_time_spent(db, task_id=task.id)
@@ -193,57 +210,73 @@ def record_time_on_activity(
     start_at: Optional[datetime] = None,
 ) -> Activity:
     today = _today_local()
-    time_log = db.query(TimeLog).filter(
-        TimeLog.activity_id == activity.id,
-        TimeLog.log_date == today,
-        TimeLog.user_id == user_id,
-    ).first()
+    _now = utc_now()
 
-    if absolute_time is not None:
+    if start_at is not None:
+        # Session-aware path: each unique sessionStartAt gets its own TimeLog row.
+        _start_aware = ensure_aware_utc(start_at).replace(microsecond=0)
+        time_log = db.query(TimeLog).filter(
+            TimeLog.activity_id == activity.id,
+            TimeLog.user_id == user_id,
+            TimeLog.start_at == _start_aware,
+        ).first()
         if time_log:
-            diff = absolute_time - activity.time_spent
-            new_seconds = time_log.seconds + diff
-            if new_seconds <= 0:
-                db.delete(time_log)
-            else:
-                time_log.seconds = new_seconds
-                if time_log.end_at is None:
-                    time_log.end_at = utc_now()
+            time_log.seconds += time_spent
+            time_log.end_at = _now
         else:
-            # Bug fix: Calcular la diferencia real, no usar el absolute_time completo para un log diario
-            diff = absolute_time - (activity.time_spent or 0)
-            log_seconds = diff if diff > 0 else time_spent
-
-            _now = utc_now()
-            _start = ensure_aware_utc(start_at) if start_at is not None else _now
-            db.add(
-                TimeLog(
+            _log_date = _start_aware.astimezone(APP_TZ).date()
+            db.add(TimeLog(
+                user_id=user_id,
+                activity_id=activity.id,
+                log_date=_log_date,
+                seconds=time_spent,
+                start_at=_start_aware,
+                end_at=_now,
+            ))
+    else:
+        # Legacy path (no start_at): merge into today's single log per activity.
+        time_log = db.query(TimeLog).filter(
+            TimeLog.activity_id == activity.id,
+            TimeLog.log_date == today,
+            TimeLog.user_id == user_id,
+        ).first()
+        if absolute_time is not None:
+            if time_log:
+                diff = absolute_time - activity.time_spent
+                new_seconds = time_log.seconds + diff
+                if new_seconds <= 0:
+                    db.delete(time_log)
+                else:
+                    time_log.seconds = new_seconds
+                    if time_log.end_at is None:
+                        time_log.end_at = _now
+            else:
+                diff = absolute_time - (activity.time_spent or 0)
+                log_seconds = diff if diff > 0 else time_spent
+                db.add(TimeLog(
                     user_id=user_id,
                     activity_id=activity.id,
                     log_date=today,
                     seconds=log_seconds,
-                    start_at=_start,
+                    start_at=_now,
                     end_at=_now,
-                )
-            )
-    else:
-        if time_log:
-            time_log.seconds += time_spent
-            if time_log.start_at is None and start_at is not None:
-                time_log.start_at = ensure_aware_utc(start_at)
-            if time_log.end_at is None:
-                time_log.end_at = utc_now()
+                ))
         else:
-            _now = utc_now()
-            _start = ensure_aware_utc(start_at) if start_at is not None else _now
-            db.add(TimeLog(
-                user_id=user_id,
-                activity_id=activity.id,
-                log_date=today,
-                seconds=time_spent,
-                start_at=_start,
-                end_at=_now,
-            ))
+            if time_log:
+                time_log.seconds += time_spent
+                if time_log.start_at is None:
+                    time_log.start_at = _now
+                if time_log.end_at is None:
+                    time_log.end_at = _now
+            else:
+                db.add(TimeLog(
+                    user_id=user_id,
+                    activity_id=activity.id,
+                    log_date=today,
+                    seconds=time_spent,
+                    start_at=_now,
+                    end_at=_now,
+                ))
 
     db.flush()
     activity = _recalc_time_spent(db, activity_id=activity.id)
