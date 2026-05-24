@@ -80,6 +80,16 @@ async def create_task(
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+    # Idempotency: if the client sent a clientOpId we already stored, return
+    # the existing row instead of creating a duplicate. Same contract as time_logs.
+    if data.clientOpId:
+        existing = db.query(Task).filter(
+            Task.client_op_id == data.clientOpId,
+            Task.deleted_at.is_(None),
+        ).first()
+        if existing:
+            return {"success": True, "task": serialize_task(existing)}
+
     task_id = _gen_task_id()
     assigned_user = None
     if data.assignedTo:
@@ -99,6 +109,7 @@ async def create_task(
         was_difficult=data.wasDifficult, deck_card_id=data.deckCardId,
         progress=100 if data.is_retroactive else 0,
         completed_at=ensure_aware_utc(data.completed_at) if (data.is_retroactive and data.completed_at) else None,
+        client_op_id=data.clientOpId,
     )
     db.add(task)
 
@@ -129,7 +140,23 @@ async def create_task(
             task.time_spent = total_seconds
 
         db.commit()
-    except (IntegrityError, DataError) as exc:
+    except IntegrityError as exc:
+        db.rollback()
+        # Race: a concurrent POST with the same clientOpId won the UNIQUE.
+        # Return the winning row so the second request is still idempotent.
+        if data.clientOpId:
+            winner = db.query(Task).filter(
+                Task.client_op_id == data.clientOpId,
+                Task.deleted_at.is_(None),
+            ).first()
+            if winner:
+                return {"success": True, "task": serialize_task(winner)}
+        logger.error(
+            "DB error creating task | user_id=%s payload=%s error=%s",
+            user.id, data.model_dump(), str(exc.orig),
+        )
+        raise HTTPException(status_code=422, detail=f"Invalid task data: {exc.orig}")
+    except DataError as exc:
         db.rollback()
         logger.error(
             "DB error creating task | user_id=%s payload=%s error=%s",
@@ -407,6 +434,15 @@ async def create_activity(
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+    # Idempotency: see create_task for rationale.
+    if data.clientOpId:
+        existing = db.query(Activity).filter(
+            Activity.client_op_id == data.clientOpId,
+            Activity.deleted_at.is_(None),
+        ).first()
+        if existing:
+            return {"success": True, "activity": serialize_activity(existing)}
+
     assigned_user = None
     if data.assignedTo:
         assigned_user = db.query(User).filter(User.nc_user_id == data.assignedTo).first()
@@ -419,6 +455,7 @@ async def create_activity(
         start_date=parse_date(data.startDate), deadline=parse_date(data.deadline),
         progress=100 if data.is_retroactive else 0,
         completed_at=ensure_aware_utc(data.completed_at) if (data.is_retroactive and data.completed_at) else None,
+        client_op_id=data.clientOpId,
     )
     try:
         db.add(activity)
@@ -441,7 +478,21 @@ async def create_activity(
 
         db.commit()
         db.refresh(activity)
-    except (IntegrityError, DataError) as exc:
+    except IntegrityError as exc:
+        db.rollback()
+        if data.clientOpId:
+            winner = db.query(Activity).filter(
+                Activity.client_op_id == data.clientOpId,
+                Activity.deleted_at.is_(None),
+            ).first()
+            if winner:
+                return {"success": True, "activity": serialize_activity(winner)}
+        logger.error(
+            "DB error creating activity | user_id=%s payload=%s error=%s",
+            user.id, data.model_dump(), str(exc.orig),
+        )
+        raise HTTPException(status_code=422, detail=f"Invalid activity data: {exc.orig}")
+    except DataError as exc:
         db.rollback()
         logger.error(
             "DB error creating activity | user_id=%s payload=%s error=%s",

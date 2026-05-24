@@ -67,6 +67,9 @@ class Task(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     deleted_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Idempotency key sent by the client on POST /tareas so a double-click /
+    # network retry returns the same row instead of inserting duplicates.
+    client_op_id = Column(String(64), unique=True, nullable=True, index=True)
 
     owner = relationship("User", back_populates="tasks", foreign_keys=[owner_id])
     assignee = relationship("User", foreign_keys=[assigned_to])
@@ -98,6 +101,8 @@ class Activity(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     deleted_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # See Task.client_op_id — same idempotency contract for POST /activities.
+    client_op_id = Column(String(64), unique=True, nullable=True, index=True)
 
     owner = relationship("User", back_populates="activities", foreign_keys=[owner_id])
     assignee = relationship("User", foreign_keys=[assigned_to])
