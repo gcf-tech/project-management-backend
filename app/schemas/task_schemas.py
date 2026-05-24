@@ -97,6 +97,7 @@ class TaskCreate(UTCModel):
     wasDifficult: bool = False
     subtasks: List[dict] = Field(default_factory=list)
     deckCardId: Optional[int] = None
+    clientOpId: Optional[str] = Field(default=None, max_length=64)
     is_retroactive: bool = False
     completed_at: Optional[AwareDatetime] = None
     time_logs: Optional[List[TimeLogEntry]] = Field(default_factory=list)
@@ -166,6 +167,7 @@ class ActivityCreate(UTCModel):
     startDate: Optional[str] = None
     deadline: Optional[str] = None
     assignedTo: Optional[str] = None
+    clientOpId: Optional[str] = Field(default=None, max_length=64)
     is_retroactive: bool = False
     completed_at: Optional[AwareDatetime] = None
     time_logs: Optional[List[TimeLogEntry]] = Field(default_factory=list)
