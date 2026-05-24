@@ -1,11 +1,57 @@
 from __future__ import annotations
 
+import re
 from datetime import date as date_type, datetime, timezone
 from enum import Enum as PyEnum
 from typing import Optional, List
+from zoneinfo import ZoneInfo
+
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
+
+from app.core.config import BUSINESS_TIMEZONE
 from app.schemas.base import UTCModel
+
+
+_BUSINESS_TZ = ZoneInfo(BUSINESS_TIMEZONE)
+_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _coerce_completed_at(v):
+    """Normalize completedAt input to a tz-aware UTC datetime.
+
+    Accepts:
+      - None
+      - tz-aware datetime / date
+      - date-only string ('YYYY-MM-DD'): anchored to midnight in BUSINESS_TIMEZONE
+        so the calendar day the user picked is preserved when converted to UTC.
+      - ISO 8601 string with offset (or trailing 'Z').
+
+    Rejects naive datetime strings explicitly. This guards against
+    `datetime.fromisoformat` silently accepting 'YYYY-MM-DD' on Python 3.11+
+    and returning a naive value (which AwareDatetime later rejects with a
+    less actionable error).
+    """
+    if v is None:
+        return None
+    if isinstance(v, datetime):
+        if v.tzinfo is None or v.utcoffset() is None:
+            raise ValueError("completedAt must include timezone offset")
+        return v
+    if isinstance(v, date_type):
+        return datetime(v.year, v.month, v.day, tzinfo=_BUSINESS_TZ).astimezone(timezone.utc)
+    if isinstance(v, str):
+        if _DATE_ONLY_RE.match(v):
+            d = date_type.fromisoformat(v)
+            return datetime(d.year, d.month, d.day, tzinfo=_BUSINESS_TZ).astimezone(timezone.utc)
+        try:
+            dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError(f"Cannot parse completedAt: {v!r}")
+        if dt.tzinfo is None or dt.utcoffset() is None:
+            raise ValueError("completedAt must include timezone offset")
+        return dt
+    return v
 
 
 class ActivityType(str, PyEnum):
@@ -111,25 +157,7 @@ class TaskCreate(UTCModel):
     @field_validator("completed_at", mode="before")
     @classmethod
     def parse_completed_at(cls, v):
-        if v is None:
-            return None
-        if isinstance(v, datetime):
-            if v.tzinfo is None or v.utcoffset() is None:
-                raise ValueError("completedAt must include timezone offset")
-            return v
-        if isinstance(v, date_type):
-            return datetime(v.year, v.month, v.day, tzinfo=timezone.utc)
-        if isinstance(v, str):
-            try:
-                return datetime.fromisoformat(v.replace("Z", "+00:00"))
-            except ValueError:
-                pass
-            try:
-                d = date_type.fromisoformat(v)
-                return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
-            except ValueError:
-                raise ValueError(f"Cannot parse completedAt: {v!r}")
-        return v
+        return _coerce_completed_at(v)
 
     @model_validator(mode="after")
     def validate_retroactive(self):
@@ -181,25 +209,7 @@ class ActivityCreate(UTCModel):
     @field_validator("completed_at", mode="before")
     @classmethod
     def parse_completed_at(cls, v):
-        if v is None:
-            return None
-        if isinstance(v, datetime):
-            if v.tzinfo is None or v.utcoffset() is None:
-                raise ValueError("completedAt must include timezone offset")
-            return v
-        if isinstance(v, date_type):
-            return datetime(v.year, v.month, v.day, tzinfo=timezone.utc)
-        if isinstance(v, str):
-            try:
-                return datetime.fromisoformat(v.replace("Z", "+00:00"))
-            except ValueError:
-                pass
-            try:
-                d = date_type.fromisoformat(v)
-                return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
-            except ValueError:
-                raise ValueError(f"Cannot parse completedAt: {v!r}")
-        return v
+        return _coerce_completed_at(v)
 
     @model_validator(mode="after")
     def validate_retroactive(self):
