@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
-from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router, calendar, reports
+from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router, calendar, reports, commercial
 
 
 @asynccontextmanager
@@ -25,6 +25,8 @@ app.add_middleware(
         "https://portal.gcf.group",
         "https://portaltest.gcf.group",
         "http://localhost:5173",
+        "http://localhost:5174",  # commercial-dashboard dev
+        "https://commercial-dashboard.up.railway.app",  # commercial-dashboard prod
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -43,6 +45,7 @@ app.include_router(weekly.router,       prefix="/api/weekly")
 app.include_router(calendar.router,     prefix="/api/calendar")
 app.include_router(config_router.router, prefix="/config")
 app.include_router(reports.router,      prefix="/api/v1")
+app.include_router(commercial.router,   prefix="/api/commercial")
 
 
 @app.get("/health")
