@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Header, Depends
 from typing import Annotated
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from app.core.config import NC_URL, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET
+from app.core.config import NC_URL, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_CLIENTS
 from app.core.security import get_nc_user_info
 from app.services.nextcloud_svc import sync_user_from_nextcloud
 from app.schemas.user_schemas import OAuthCallback
@@ -13,10 +13,20 @@ router = APIRouter()
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+    client_id: str = None  # For multi-client support
 
 @router.post("/callback")
 async def oauth_callback(body: OAuthCallback):
-    if not OAUTH_CLIENT_ID or not OAUTH_CLIENT_SECRET:
+    # Support multiple OAuth clients
+    client_id = body.client_id or OAUTH_CLIENT_ID
+    client_secret = OAUTH_CLIENTS.get(client_id) or OAUTH_CLIENT_SECRET
+    
+    # Debug logging
+    print(f"[DEBUG] OAuth callback - client_id: {client_id}")
+    print(f"[DEBUG] Available clients: {list(OAUTH_CLIENTS.keys())}")
+    print(f"[DEBUG] Client found: {client_id in OAUTH_CLIENTS}")
+    
+    if not client_id or not client_secret:
         raise HTTPException(status_code=500, detail="OAuth not configured")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -26,8 +36,8 @@ async def oauth_callback(body: OAuthCallback):
                 "grant_type": "authorization_code",
                 "code": body.code,
                 "redirect_uri": body.redirect_uri,
-                "client_id": OAUTH_CLIENT_ID,
-                "client_secret": OAUTH_CLIENT_SECRET,
+                "client_id": client_id,
+                "client_secret": client_secret,
             },
         )
         if response.status_code != 200:
@@ -46,7 +56,11 @@ async def oauth_callback(body: OAuthCallback):
 @router.post("/refresh")
 async def oauth_refresh(body: RefreshRequest):
     """Renueva access_token usando refresh_token. No requiere Authorization header."""
-    if not OAUTH_CLIENT_ID or not OAUTH_CLIENT_SECRET:
+    # Support multiple OAuth clients
+    client_id = body.client_id or OAUTH_CLIENT_ID
+    client_secret = OAUTH_CLIENTS.get(client_id) or OAUTH_CLIENT_SECRET
+    
+    if not client_id or not client_secret:
         raise HTTPException(status_code=500, detail="OAuth not configured")
     if not body.refresh_token:
         raise HTTPException(status_code=400, detail="refresh_token required")
@@ -57,8 +71,8 @@ async def oauth_refresh(body: RefreshRequest):
             data={
                 "grant_type": "refresh_token",
                 "refresh_token": body.refresh_token,
-                "client_id": OAUTH_CLIENT_ID,
-                "client_secret": OAUTH_CLIENT_SECRET,
+                "client_id": client_id,
+                "client_secret": client_secret,
             },
         )
         if response.status_code != 200:

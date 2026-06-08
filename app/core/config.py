@@ -1,8 +1,40 @@
 import os
+from dotenv import load_dotenv
+
+# Load .env file
+load_dotenv()
 
 NC_URL = os.getenv("NC_URL", "https://portaltest.gcf.group")
+
+# Legacy single client (for backward compatibility)
 OAUTH_CLIENT_ID = os.getenv("NC_OAUTH_CLIENT_ID", "")
 OAUTH_CLIENT_SECRET = os.getenv("NC_OAUTH_CLIENT_SECRET", "")
+
+# Multiple OAuth clients support
+# Format: "client_id1:secret1,client_id2:secret2"
+OAUTH_CLIENTS_RAW = os.getenv("NC_OAUTH_CLIENTS", "")
+OAUTH_CLIENTS = {}
+
+print(f"[CONFIG DEBUG] OAUTH_CLIENTS_RAW length: {len(OAUTH_CLIENTS_RAW)}")
+print(f"[CONFIG DEBUG] OAUTH_CLIENTS_RAW (first 100 chars): {OAUTH_CLIENTS_RAW[:100] if OAUTH_CLIENTS_RAW else 'EMPTY'}")
+
+# Parse multiple clients from env var
+if OAUTH_CLIENTS_RAW:
+    # Remove surrounding quotes if present
+    raw = OAUTH_CLIENTS_RAW.strip().strip('"').strip("'")
+    print(f"[CONFIG DEBUG] After strip - length: {len(raw)}")
+    for pair in raw.split(","):
+        if ":" in pair:
+            client_id, secret = pair.strip().split(":", 1)
+            OAUTH_CLIENTS[client_id.strip()] = secret.strip()
+            print(f"[CONFIG DEBUG] Added client: {client_id.strip()[:20]}...")
+
+print(f"[CONFIG DEBUG] Total clients loaded: {len(OAUTH_CLIENTS)}")
+
+# Add legacy client if configured
+if OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET:
+    OAUTH_CLIENTS[OAUTH_CLIENT_ID] = OAUTH_CLIENT_SECRET
+    print(f"[CONFIG DEBUG] Added legacy client: {OAUTH_CLIENT_ID[:20]}...")
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "3306")

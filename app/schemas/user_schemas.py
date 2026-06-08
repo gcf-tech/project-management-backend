@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 class OAuthCallback(BaseModel):
     code: str
     redirect_uri: str
+    client_id: Optional[str] = None  # For multi-client support
 
 
 class UserUpdate(BaseModel):
