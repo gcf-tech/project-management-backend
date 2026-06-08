@@ -43,6 +43,8 @@ class ComercialData(BaseModel):
     userId: int
     nombre: str
     email: Optional[str] = None
+    teamId: Optional[int] = None
+    role: Optional[str] = None
     metaClientes: int
     minInv: float
     comision: float
@@ -232,6 +234,8 @@ async def get_state(
             userId=u.id,
             nombre=u.display_name,
             email=u.email,
+            teamId=u.team_id,
+            role=u.role,
             metaClientes=settings.meta_clientes,
             minInv=float(settings.min_inv),
             comision=float(settings.comision),
