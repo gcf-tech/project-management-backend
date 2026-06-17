@@ -10,8 +10,6 @@ from sqlalchemy import or_
 
 from app.api.dependencies import get_db, get_current_user
 from app.db.models import Task, Activity, UserPreferences, WeeklyBlock
-from app.schemas.weekly import WeeklyBlockUnified
-from app.services.weekly_aggregator_service import get_unified_week
 from app.services.weekly_recurrence import (
     serialize_block,
     get_virtual_projections,
@@ -273,26 +271,6 @@ async def get_blocks(
         return Response(status_code=304, headers=headers)
 
     return Response(content=payload_bytes, media_type="application/json", headers=headers)
-
-
-@router.get("/unified")
-async def get_unified_blocks(
-    week_start: date = Query(...),
-    authorization: Annotated[str | None, Header()] = None,
-    db: Session = Depends(get_db),
-):
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    user = await get_current_user(authorization, db)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    if week_start > date.today() + timedelta(days=365):
-        raise HTTPException(status_code=400, detail="week_start no puede ser mayor a un año en el futuro")
-
-    end_date = week_start + timedelta(days=6)
-    blocks = get_unified_week(db, user.id, week_start, end_date)
-    return [b.model_dump(mode="json") for b in blocks]
 
 
 @router.post("/blocks", status_code=201)

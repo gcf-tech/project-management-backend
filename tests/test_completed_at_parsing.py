@@ -20,7 +20,6 @@ def _base_retro_payload(**overrides):
         "isRetroactive": True,
         "startDate": "2026-05-18",
         "completedAt": "2026-05-20",
-        "timeLogs": [{"logDate": "2026-05-18", "hours": 5}],
     }
     payload.update(overrides)
     return payload

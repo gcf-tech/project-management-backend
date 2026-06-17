@@ -9,18 +9,13 @@ from sqlalchemy.exc import IntegrityError, DataError
 logger = logging.getLogger(__name__)
 
 from app.api.dependencies import get_db, get_current_user
-from app.db.models import Task, Activity, Subtask, TimeLog, Observation, User
+from app.db.models import Task, Activity, Subtask, Observation, User
 from app.schemas.task_schemas import (
-    TaskCreate, TaskPatch, ActivityCreate, ActivityPatch,
-    TimeRecord, ColumnUpdate, TimeLogCreate, TimeLogPatch
+    TaskCreate, TaskPatch, ActivityCreate, ActivityPatch, ColumnUpdate,
 )
-from app.services.task_svc import (
-    serialize_task, serialize_activity,
-    record_time_on_task, record_time_on_activity,
-    _recalc_time_spent
-)
+from app.services.task_svc import serialize_task, serialize_activity
 from app.services.nextcloud_svc import parse_date
-from app.core.datetime_utils import utc_now, ensure_aware_utc, to_rfc3339_z
+from app.core.datetime_utils import utc_now, ensure_aware_utc
 
 router = APIRouter()
 
@@ -118,27 +113,10 @@ async def create_task(
             id=sub.get("id", _gen_subtask_id(idx)),
             task_id=task_id, text=sub.get("text", ""),
             completed=True if data.is_retroactive else sub.get("completed", False),
-            time_spent=sub.get("timeSpent", 0),
         ))
 
     try:
         db.flush()
-
-        if data.is_retroactive and data.time_logs:
-            total_seconds = 0
-            for entry in data.time_logs:
-                seconds = int(round(entry.hours * 3600))
-                db.add(TimeLog(
-                    user_id=user.id,
-                    task_id=task_id,
-                    log_date=entry.log_date,
-                    seconds=seconds,
-                    client_op_id=f"retro-{task_id}-{entry.log_date.isoformat()}",
-                ))
-                total_seconds += seconds
-            db.flush()
-            task.time_spent = total_seconds
-
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -191,8 +169,6 @@ async def patch_task(
             task.start_date = parse_date(value)
         elif field == "deadline":
             task.deadline = parse_date(value)
-        elif field == "timeSpent":
-            task.time_spent = value
         elif field == "progress":
             task.progress = value
         elif field == "wasDifficult":
@@ -209,20 +185,11 @@ async def patch_task(
                     id=sub.get("id", _gen_subtask_id(idx)),
                     task_id=task_id, text=sub.get("text", ""),
                     completed=sub.get("completed", False),
-                    time_spent=sub.get("timeSpent", 0),
                 ))
         elif field == "observations" and value is not None:
             db.query(Observation).filter(Observation.task_id == task_id).delete()
             for obs in value:
                 db.add(Observation(task_id=task_id, user_id=task.owner_id, text=obs.get("text", "")))
-        elif field == "timeLog" and value is not None:
-            db.query(TimeLog).filter(TimeLog.task_id == task_id).delete()
-            for entry in value:
-                db.add(TimeLog(
-                    user_id=task.owner_id, task_id=task_id,
-                    log_date=parse_date(entry.get("date")),
-                    seconds=entry.get("seconds", 0),
-                ))
         elif hasattr(task, field):
             setattr(task, field, value)
 
@@ -265,7 +232,6 @@ async def update_task(
             id=sub.get("id", _gen_subtask_id(idx)),
             task_id=task_id, text=sub.get("text", ""),
             completed=sub.get("completed", False),
-            time_spent=sub.get("timeSpent", 0),
         ))
 
     db.commit()
@@ -291,31 +257,6 @@ async def delete_task(
     task.deleted_by = user.id if user else None
     db.commit()
     return {"success": True}
-
-
-@router.post("/tareas/{task_id}/time")
-async def record_task_time(
-    task_id: str,
-    time_data: TimeRecord,
-    authorization: Annotated[str | None, Header()] = None,
-    db: Session = Depends(get_db),
-):
-    task = db.query(Task).filter(Task.id == task_id, Task.deleted_at.is_(None)).first()
-    if not task:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    user = None
-    if authorization:
-        user = await get_current_user(authorization, db)
-        if user and task.owner_id != user.id:
-            raise HTTPException(status_code=403, detail="Access denied")
-    user_id = user.id if user else task.owner_id
-    task = record_time_on_task(
-        db, task, user_id,
-        time_data.timeSpent, time_data.absoluteTime,
-        time_data.subtaskId, time_data.feedback,
-        time_data.startAt,
-    )
-    return {"success": True, "task": serialize_task(task)}
 
 
 @router.patch("/tareas/{task_id}/columna")
@@ -460,22 +401,6 @@ async def create_activity(
     try:
         db.add(activity)
         db.flush()
-
-        if data.is_retroactive and data.time_logs:
-            total_seconds = 0
-            for entry in data.time_logs:
-                seconds = int(round(entry.hours * 3600))
-                db.add(TimeLog(
-                    user_id=user.id,
-                    activity_id=activity_id,
-                    log_date=entry.log_date,
-                    seconds=seconds,
-                    client_op_id=f"retro-act-{activity_id}-{entry.log_date.isoformat()}",
-                ))
-                total_seconds += seconds
-            db.flush()
-            activity.time_spent = total_seconds
-
         db.commit()
         db.refresh(activity)
     except IntegrityError as exc:
@@ -527,8 +452,6 @@ async def patch_activity(
             activity.start_date = parse_date(value)
         elif field == "deadline":
             activity.deadline = parse_date(value)
-        elif field == "timeSpent":
-            activity.time_spent = value
         elif field == "progress":
             if value == 100 and prev_progress != 100:
                 activity.completed_at = datetime.utcnow()
@@ -538,14 +461,6 @@ async def patch_activity(
         elif field == "assignedTo" and value:
             u = db.query(User).filter(User.nc_user_id == value).first()
             activity.assigned_to = u.id if u else None
-        elif field == "timeLog" and value is not None:
-            db.query(TimeLog).filter(TimeLog.activity_id == activity_id).delete()
-            for entry in value:
-                db.add(TimeLog(
-                    user_id=activity.owner_id, activity_id=activity_id,
-                    log_date=parse_date(entry.get("date")),
-                    seconds=entry.get("seconds", 0),
-                ))
         elif hasattr(activity, field):
             setattr(activity, field, value)
 
@@ -585,33 +500,6 @@ async def delete_activity(
     return {"success": True}
 
 
-@router.post("/activities/{activity_id}/time")
-async def record_activity_time(
-    activity_id: str,
-    time_data: TimeRecord,
-    authorization: Annotated[str | None, Header()] = None,
-    db: Session = Depends(get_db),
-):
-    activity = db.query(Activity).filter(
-        Activity.id == activity_id, Activity.deleted_at.is_(None)
-    ).first()
-    if not activity:
-        raise HTTPException(status_code=404, detail=f"Activity {activity_id} not found")
-    user = None
-    if authorization:
-        user = await get_current_user(authorization, db)
-        if user and activity.owner_id != user.id:
-            raise HTTPException(status_code=403, detail="Access denied")
-    user_id = user.id if user else activity.owner_id
-    activity = record_time_on_activity(
-        db, activity, user_id,
-        time_data.timeSpent, time_data.absoluteTime,
-        time_data.feedback,
-        time_data.startAt,
-    )
-    return {"success": True, "activity": serialize_activity(activity)}
-
-
 @router.post("/activities/{activity_id}/reabrir")
 async def reabrir_activity(
     activity_id: str,
@@ -634,247 +522,3 @@ async def reabrir_activity(
     db.refresh(activity)
     return {"success": True, "activity": serialize_activity(activity)}
 
-# ── Time Logs ───────────────────────────────────────────────────────────────
-
-@router.post("/tareas/{task_id}/time-logs")
-async def create_task_time_log(
-    task_id: str,
-    data: TimeLogCreate,
-    authorization: Annotated[str | None, Header()] = None,
-    db: Session = Depends(get_db),
-):
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    user = await get_current_user(authorization, db)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    task = db.query(Task).filter(Task.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    if data.seconds <= 0 or data.seconds > 86400:
-        raise HTTPException(status_code=400, detail="Invalid seconds")
-
-    log_date = parse_date(data.logDate)
-    if log_date > datetime.now(timezone.utc).date():
-        raise HTTPException(status_code=400, detail="Future dates not allowed")
-
-    if data.clientOpId:
-        existing_op = db.query(TimeLog).filter(TimeLog.client_op_id == data.clientOpId).first()
-        if existing_op:
-            return {"success": True, "task": serialize_task(task)}
-
-    existing_log = db.query(TimeLog).filter(
-        TimeLog.task_id == task_id,
-        TimeLog.user_id == user.id,
-        TimeLog.log_date == log_date
-    ).first()
-
-    if existing_log:
-        raise HTTPException(status_code=409, detail="Time log for this date already exists")
-
-    new_log = TimeLog(
-        user_id=user.id,
-        task_id=task_id,
-        log_date=log_date,
-        seconds=data.seconds,
-        client_op_id=data.clientOpId,
-        start_at=ensure_aware_utc(data.startAt) if data.startAt is not None else None,
-    )
-    db.add(new_log)
-    db.flush()
-    task = _recalc_time_spent(db, task_id=task_id)
-    db.commit()
-    db.refresh(task)
-    return {"success": True, "task": serialize_task(task)}
-
-@router.post("/activities/{activity_id}/time-logs")
-async def create_activity_time_log(
-    activity_id: str,
-    data: TimeLogCreate,
-    authorization: Annotated[str | None, Header()] = None,
-    db: Session = Depends(get_db),
-):
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    user = await get_current_user(authorization, db)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    activity = db.query(Activity).filter(Activity.id == activity_id).first()
-    if not activity:
-        raise HTTPException(status_code=404, detail="Activity not found")
-
-    if data.seconds <= 0 or data.seconds > 86400:
-        raise HTTPException(status_code=400, detail="Invalid seconds")
-
-    log_date = parse_date(data.logDate)
-    if log_date > datetime.now(timezone.utc).date():
-        raise HTTPException(status_code=400, detail="Future dates not allowed")
-
-    if data.clientOpId:
-        existing_op = db.query(TimeLog).filter(TimeLog.client_op_id == data.clientOpId).first()
-        if existing_op:
-            return {"success": True, "activity": serialize_activity(activity)}
-
-    existing_log = db.query(TimeLog).filter(
-        TimeLog.activity_id == activity_id,
-        TimeLog.user_id == user.id,
-        TimeLog.log_date == log_date
-    ).first()
-
-    if existing_log:
-        raise HTTPException(status_code=409, detail="Time log for this date already exists")
-
-    new_log = TimeLog(
-        user_id=user.id,
-        activity_id=activity_id,
-        log_date=log_date,
-        seconds=data.seconds,
-        client_op_id=data.clientOpId,
-        start_at=ensure_aware_utc(data.startAt) if data.startAt is not None else None,
-    )
-    db.add(new_log)
-    db.flush()
-    activity = _recalc_time_spent(db, activity_id=activity_id)
-    db.commit()
-    db.refresh(activity)
-    return {"success": True, "activity": serialize_activity(activity)}
-
-@router.get("/tareas/{task_id}/time-logs")
-async def get_task_time_logs(
-    task_id: str,
-    authorization: Annotated[str | None, Header()] = None,
-    db: Session = Depends(get_db),
-):
-    logs = db.query(TimeLog).filter(TimeLog.task_id == task_id).order_by(TimeLog.log_date.desc()).all()
-    return [{"id": l.id, "logDate": l.log_date.isoformat(), "seconds": l.seconds, "userId": l.user_id, "updatedAt": to_rfc3339_z(l.updated_at)} for l in logs]
-
-@router.get("/activities/{activity_id}/time-logs")
-async def get_activity_time_logs(
-    activity_id: str,
-    authorization: Annotated[str | None, Header()] = None,
-    db: Session = Depends(get_db),
-):
-    logs = db.query(TimeLog).filter(TimeLog.activity_id == activity_id).order_by(TimeLog.log_date.desc()).all()
-    return [{"id": l.id, "logDate": l.log_date.isoformat(), "seconds": l.seconds, "userId": l.user_id, "updatedAt": to_rfc3339_z(l.updated_at)} for l in logs]
-
-@router.patch("/time-logs/{log_id}")
-async def patch_time_log(
-    log_id: int,
-    data: TimeLogPatch,
-    authorization: Annotated[str | None, Header()] = None,
-    db: Session = Depends(get_db),
-):
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    user = await get_current_user(authorization, db)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    time_log = db.query(TimeLog).filter(TimeLog.id == log_id).first()
-    if not time_log:
-        # Idempotent: row already deleted by a prior seconds=0 call with the same clientOpId
-        if data.seconds == 0 and data.clientOpId:
-            return {"success": True}
-        raise HTTPException(status_code=404, detail="Time log not found")
-
-    if time_log.user_id != user.id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    task_id = time_log.task_id
-    activity_id = time_log.activity_id
-
-    if data.seconds == 0:
-        db.delete(time_log)
-    else:
-        if data.seconds < 0 or data.seconds > 86400:
-            raise HTTPException(status_code=400, detail="Invalid seconds")
-        time_log.seconds = data.seconds
-        time_log.client_op_id = data.clientOpId
-        if data.startAt is not None:
-            time_log.start_at = ensure_aware_utc(data.startAt)
-
-    db.flush()
-    if task_id:
-        obj = _recalc_time_spent(db, task_id=task_id)
-        db.commit()
-        db.refresh(obj)
-        return {"success": True, "task": serialize_task(obj)}
-    else:
-        obj = _recalc_time_spent(db, activity_id=activity_id)
-        db.commit()
-        db.refresh(obj)
-        return {"success": True, "activity": serialize_activity(obj)}
-
-@router.delete("/time-logs/{log_id}")
-async def delete_time_log(
-    log_id: int,
-    clientOpId: Optional[str] = None,
-    authorization: Annotated[str | None, Header()] = None,
-    db: Session = Depends(get_db),
-):
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    user = await get_current_user(authorization, db)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    time_log = db.query(TimeLog).filter(TimeLog.id == log_id).first()
-    if not time_log:
-        if clientOpId:
-            return {"success": True} 
-        raise HTTPException(status_code=404, detail="Time log not found")
-
-    if time_log.user_id != user.id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    task_id = time_log.task_id
-    activity_id = time_log.activity_id
-
-    db.delete(time_log)
-    db.flush()
-    if task_id:
-        obj = _recalc_time_spent(db, task_id=task_id)
-        db.commit()
-        db.refresh(obj)
-        return {"success": True, "task": serialize_task(obj)}
-    else:
-        obj = _recalc_time_spent(db, activity_id=activity_id)
-        db.commit()
-        db.refresh(obj)
-        return {"success": True, "activity": serialize_activity(obj)}
-
-@router.post("/admin/time-logs/reconcile")
-async def reconcile_time_logs(
-    authorization: Annotated[str | None, Header()] = None,
-    db: Session = Depends(get_db),
-):
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    user = await get_current_user(authorization, db)
-    if not user or user.role not in ["admin"]:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    tasks = db.query(Task).all()
-    for t in tasks:
-        _recalc_time_spent(db, task_id=t.id)
-    
-    activities = db.query(Activity).all()
-    for a in activities:
-        _recalc_time_spent(db, activity_id=a.id)
-
-    db.commit()
-    return {"success": True, "message": f"Reconciled {len(tasks)} tasks and {len(activities)} activities."}
-
-@router.get("/health")
-async def health(db: Session = Depends(get_db)):
-    return {
-        "status": "healthy",
-        "service": "Activity Tracker API",
-        "version": "4.0.0",
-        "database": "MySQL/Railway",
-        "tasks_count": db.query(Task).filter(Task.deleted_at.is_(None)).count(),
-        "users_count": db.query(User).count(),
-    }

@@ -1,8 +1,7 @@
 from datetime import date, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func, extract
-from app.db.models import Task, Activity, TimeLog, User, Team
-from app.db.query_helpers import join_active_parents
+from app.db.models import Task, User
 
 MONTH_NAMES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
                'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -31,15 +30,6 @@ def calculate_user_metrics(db: Session, user_id: int,
     )
     completed_tasks = completed_tasks_q.count()
     completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
-
-    total_seconds = join_active_parents(
-        db.query(func.sum(TimeLog.seconds))
-    ).filter(
-        TimeLog.user_id == user_id,
-        TimeLog.log_date >= start_date,
-        TimeLog.log_date <= end_date,
-    ).scalar() or 0
-    hours_worked = round(total_seconds / 3600, 1)
 
     avg_difficulty = db.query(func.avg(Task.difficulty)).filter(
         Task.owner_id == user_id,
@@ -79,31 +69,6 @@ def calculate_user_metrics(db: Session, user_id: int,
         for row in tasks_by_month_q
     ]
 
-    eighty_four_days_ago = end_date - timedelta(days=84)
-    time_logs = join_active_parents(
-        db.query(TimeLog)
-    ).filter(
-        TimeLog.user_id == user_id,
-        TimeLog.log_date >= eighty_four_days_ago,
-        TimeLog.log_date <= end_date,
-    ).all()
-
-    deep_work_by_day = {}
-    for log in time_logs:
-        key = log.log_date.isoformat()
-        deep_work_by_day[key] = deep_work_by_day.get(key, 0) + log.seconds
-
-    predictability = []
-    for t in completed_list:
-        if t.start_date and t.deadline and t.time_spent > 0:
-            estimated_h = round(((t.deadline - t.start_date).days or 1) * 8, 1)
-            actual_h = round(t.time_spent / 3600, 1)
-            predictability.append({
-                "title": t.title,
-                "estimated": estimated_h,
-                "actual": actual_h,
-            })
-
     difficult_list = db.query(Task).filter(
         Task.owner_id == user_id,
         Task.deleted_at.is_(None),
@@ -131,14 +96,11 @@ def calculate_user_metrics(db: Session, user_id: int,
         "totalTasks": total_tasks,
         "completedTasks": completed_tasks,
         "completionRate": round(completion_rate, 1),
-        "hoursWorked": hours_worked,
         "iel": iel,
         "slaAvgDays": sla_days,
         "avgDifficulty": round(float(avg_difficulty), 1),
         "tasksByMonth": tasks_by_month,
         "tasksByStatus": tasks_by_status,
-        "deepWorkByDay": deep_work_by_day,
-        "predictabilityByTask": predictability,
         "difficultTasks": difficult_tasks,
     }
 
@@ -156,8 +118,7 @@ def calculate_team_metrics(db: Session, team_id: int,
     if not member_ids:
         return {
             "teamId": team_id, "memberCount": 0, "totalTasks": 0,
-            "completedTasks": 0, "completionRate": 0, "hoursWorked": 0,
-            "avgProductivity": 0, "memberMetrics": [],
+            "completedTasks": 0, "completionRate": 0, "memberMetrics": [],
         }
 
     total_tasks = db.query(Task).filter(
@@ -176,17 +137,6 @@ def calculate_team_metrics(db: Session, team_id: int,
     ).count()
 
     completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
-
-    total_seconds = join_active_parents(
-        db.query(func.sum(TimeLog.seconds))
-    ).filter(
-        TimeLog.user_id.in_(member_ids),
-        TimeLog.log_date >= start_date,
-        TimeLog.log_date <= end_date,
-    ).scalar() or 0
-
-    hours_worked = round(total_seconds / 3600, 1)
-    avg_productivity = round(completed_tasks / hours_worked, 2) if hours_worked > 0 else 0
 
     team_status_rows = db.query(
         Task.column_status,
@@ -209,12 +159,10 @@ def calculate_team_metrics(db: Session, team_id: int,
             "completedTasks": m["completedTasks"],
             "totalTasks": m["totalTasks"],
             "completionRate": m["completionRate"],
-            "hoursWorked": m["hoursWorked"],
             "iel": m["iel"],
             "slaAvgDays": m["slaAvgDays"],
             "tasksByMonth": m["tasksByMonth"],
             "tasksByStatus": m["tasksByStatus"],
-            "deepWorkByDay": m["deepWorkByDay"],
         })
 
     member_metrics.sort(key=lambda x: x["completionRate"], reverse=True)
@@ -225,8 +173,6 @@ def calculate_team_metrics(db: Session, team_id: int,
         "totalTasks": total_tasks,
         "completedTasks": completed_tasks,
         "completionRate": round(completion_rate, 1),
-        "hoursWorked": hours_worked,
-        "avgProductivity": avg_productivity,
         "tasksByStatus": tasks_by_status,
         "memberMetrics": member_metrics,
     }

@@ -66,20 +66,6 @@ class TaskType(str, PyEnum):
     task = "task"
 
 
-class SubtaskCreate(UTCModel):
-    id: Optional[str] = None
-    text: str
-    completed: bool = False
-    timeSpent: int = 0
-
-
-class TimeLogEntry(UTCModel):
-    log_date: date_type
-    hours: float = Field(gt=0, le=24)
-
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
-
-
 def _parse_date_str(date_str: Optional[str]) -> Optional[date_type]:
     if not date_str:
         return None
@@ -89,7 +75,7 @@ def _parse_date_str(date_str: Optional[str]) -> Optional[date_type]:
         return None
 
 
-def _validate_retroactive_fields(is_retroactive, completed_at, startDate, time_logs):
+def _validate_retroactive_fields(is_retroactive, completed_at, startDate):
     """Shared validator logic for TaskCreate and ActivityCreate."""
     if not is_retroactive:
         return
@@ -104,28 +90,9 @@ def _validate_retroactive_fields(is_retroactive, completed_at, startDate, time_l
     if completed_date > today:
         raise ValueError("completed_at cannot be in the future")
 
-    if not time_logs:
-        raise ValueError("timeLogs is required when isRetroactive=True")
-
     start_date = _parse_date_str(startDate)
     if start_date and start_date > completed_date:
         raise ValueError("start_date must be on or before completed_at")
-
-    seen_dates: set = set()
-    for entry in (time_logs or []):
-        if entry.log_date > today:
-            raise ValueError(f"time_log log_date {entry.log_date} cannot be in the future")
-        if entry.log_date > completed_date:
-            raise ValueError(
-                f"time_log log_date {entry.log_date} is after completed_at ({completed_date})"
-            )
-        if start_date and entry.log_date < start_date:
-            raise ValueError(
-                f"time_log log_date {entry.log_date} is before start_date ({start_date})"
-            )
-        if entry.log_date in seen_dates:
-            raise ValueError(f"Duplicate log_date {entry.log_date} in time_logs")
-        seen_dates.add(entry.log_date)
 
 
 class TaskCreate(UTCModel):
@@ -146,7 +113,6 @@ class TaskCreate(UTCModel):
     clientOpId: Optional[str] = Field(default=None, max_length=64)
     is_retroactive: bool = False
     completed_at: Optional[AwareDatetime] = None
-    time_logs: Optional[List[TimeLogEntry]] = Field(default_factory=list)
 
     model_config = ConfigDict(
         alias_generator=to_camel,
@@ -162,7 +128,7 @@ class TaskCreate(UTCModel):
     @model_validator(mode="after")
     def validate_retroactive(self):
         _validate_retroactive_fields(
-            self.is_retroactive, self.completed_at, self.startDate, self.time_logs
+            self.is_retroactive, self.completed_at, self.startDate
         )
         return self
 
@@ -176,7 +142,6 @@ class TaskPatch(BaseModel):
     startDate: Optional[str] = None
     deadline: Optional[str] = None
     progress: Optional[int] = None
-    timeSpent: Optional[int] = None
     activityType: Optional[str] = None
     assignedTo: Optional[str] = None
     difficulty: Optional[int] = None
@@ -184,7 +149,6 @@ class TaskPatch(BaseModel):
     wasDifficult: Optional[bool] = None
     subtasks: Optional[List[dict]] = None
     observations: Optional[List[dict]] = None
-    timeLog: Optional[List[dict]] = None
 
 
 class ActivityCreate(UTCModel):
@@ -198,7 +162,6 @@ class ActivityCreate(UTCModel):
     clientOpId: Optional[str] = Field(default=None, max_length=64)
     is_retroactive: bool = False
     completed_at: Optional[AwareDatetime] = None
-    time_logs: Optional[List[TimeLogEntry]] = Field(default_factory=list)
 
     model_config = ConfigDict(
         alias_generator=to_camel,
@@ -214,7 +177,7 @@ class ActivityCreate(UTCModel):
     @model_validator(mode="after")
     def validate_retroactive(self):
         _validate_retroactive_fields(
-            self.is_retroactive, self.completed_at, self.startDate, self.time_logs
+            self.is_retroactive, self.completed_at, self.startDate
         )
         return self
 
@@ -227,32 +190,9 @@ class ActivityPatch(BaseModel):
     startDate: Optional[str] = None
     deadline: Optional[str] = None
     progress: Optional[int] = None
-    timeSpent: Optional[int] = None
     assignedTo: Optional[str] = None
     observations: Optional[List[dict]] = None
-    timeLog: Optional[List[dict]] = None
-
-
-class TimeRecord(UTCModel):
-    timeSpent: int
-    subtaskId: Optional[str] = None
-    feedback: Optional[dict] = None
-    absoluteTime: Optional[int] = None
-    startAt: Optional[AwareDatetime] = None
 
 
 class ColumnUpdate(BaseModel):
     column: str
-
-
-class TimeLogCreate(UTCModel):
-    logDate: str
-    seconds: int
-    clientOpId: Optional[str] = None
-    startAt: Optional[AwareDatetime] = None
-
-
-class TimeLogPatch(UTCModel):
-    seconds: int
-    clientOpId: Optional[str] = None
-    startAt: Optional[AwareDatetime] = None
