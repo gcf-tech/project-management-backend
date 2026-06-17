@@ -278,3 +278,97 @@ class WeeklyBlock(Base):
         # type=ref instead of falling back to a non-prefix scan.
         Index("idx_weekly_blocks_user_series", "user_id", "series_id"),
     )
+
+
+# ============================================================
+# COMMERCIAL DASHBOARD MODELS
+# ============================================================
+
+class CommercialConfig(Base):
+    """Configuración global del dashboard comercial por periodo"""
+    __tablename__ = "commercial_config"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    year = Column(Integer, nullable=False)
+    month = Column(Integer, nullable=False)  # 0-11 (enero=0, diciembre=11)
+    meta_mensual = Column(DECIMAL(12, 2), default=200000)
+    meta_contactos_dia = Column(Integer, default=25)
+    meta_reuniones_dia = Column(Integer, default=3)
+    meta_contratos_dia = Column(Integer, default=2)
+    ticket_promedio = Column(DECIMAL(12, 2), default=50000)
+    meta_clientes_nuevos_mes = Column(Integer, default=4)
+    monto_min_inversion = Column(DECIMAL(12, 2), default=50000)
+    pct_comision = Column(DECIMAL(5, 2), default=2.0)
+    umbral_verde = Column(DECIMAL(3, 2), default=1.0)
+    umbral_amarillo = Column(DECIMAL(3, 2), default=0.8)
+    negocio = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        Index("unique_period", "year", "month", unique=True),
+    )
+
+
+class CommercialSettings(Base):
+    """Configuración individual por comercial (extiende User)"""
+    __tablename__ = "commercial_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    meta_clientes = Column(Integer, default=4)  # meta individual de clientes nuevos por mes
+    min_inv = Column(DECIMAL(12, 2), default=50000)  # monto mínimo inversión individual
+    comision = Column(DECIMAL(5, 2), default=2.0)  # % comisión individual
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("idx_commercial_settings_user", "user_id"),
+    )
+
+
+class CommercialDailyData(Base):
+    """Datos diarios por comercial"""
+    __tablename__ = "commercial_daily_data"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    date = Column(Date, nullable=False)
+    year = Column(Integer, nullable=False)
+    month = Column(Integer, nullable=False)  # 0-11
+    day = Column(Integer, nullable=False)  # 1-31
+
+    # Actividad del día
+    contactos = Column(Integer, default=0)
+    reuniones = Column(Integer, default=0)
+    contratos = Column(Integer, default=0)
+    ventas = Column(DECIMAL(12, 2), default=0)
+    clientes_nuevos = Column(Integer, default=0)
+
+    # Tracking del funnel
+    leads_nuevos = Column(Integer, default=0)
+    leads_contactados = Column(Integer, default=0)
+    leads_interesados = Column(Integer, default=0)
+    leads_info_enviada = Column(Integer, default=0)
+    leads_seguimiento = Column(Integer, default=0)
+    leads_presentacion = Column(Integer, default=0)
+    leads_negociacion = Column(Integer, default=0)
+    leads_cerrados = Column(Integer, default=0)
+
+    # Notas del día
+    notas = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("unique_user_date", "user_id", "date", unique=True),
+        Index("idx_commercial_daily_date", "date"),
+        Index("idx_commercial_daily_year_month", "year", "month"),
+        Index("idx_commercial_daily_user_year_month", "user_id", "year", "month"),
+    )
