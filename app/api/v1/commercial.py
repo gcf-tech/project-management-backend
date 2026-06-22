@@ -238,7 +238,7 @@ async def get_state(
             nombre=u.display_name,
             email=u.email,
             teamId=u.team_id,
-            role=u.role,
+            role=u.role_commercial or "member",  # Use role_commercial for frontend
             meta=float(settings.meta) if settings.meta is not None else None,  # ← AGREGADO
             metaClientes=settings.meta_clientes,
             minInv=float(settings.min_inv),

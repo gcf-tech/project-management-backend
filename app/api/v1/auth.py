@@ -105,6 +105,6 @@ async def get_me(
         "displayname": displayname,
         "email": nc_data.get("email", ""),
         "initials": initials,
-        "role": user.role,
+        "role": user.role_commercial or "member",  # Use role_commercial for frontend
         "teamId": user.team_id,
     }
