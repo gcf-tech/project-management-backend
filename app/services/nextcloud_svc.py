@@ -39,14 +39,6 @@ async def sync_user_from_nextcloud(db: Session, nc_data: dict, authorization: st
             db.add(team)
             db.flush()
 
-    # Determine role_commercial based on team_id
-    role_commercial = None
-    if team:
-        if team.id == 7:
-            role_commercial = "admin"
-        elif team.id == 2:
-            role_commercial = "commercial"
-
     user = db.query(User).filter(User.nc_user_id == nc_data["id"]).first()
     if not user:
         user = User(
@@ -54,7 +46,7 @@ async def sync_user_from_nextcloud(db: Session, nc_data: dict, authorization: st
             display_name=nc_data.get("displayname", nc_data["id"]),
             email=nc_data.get("email"),
             role=role,
-            role_commercial=role_commercial,
+            role_commercial=None,  # Manual field, not synced from Nextcloud
             team_id=team.id if team else None,
         )
         db.add(user)
@@ -62,7 +54,7 @@ async def sync_user_from_nextcloud(db: Session, nc_data: dict, authorization: st
         user.display_name = nc_data.get("displayname", nc_data["id"])
         user.email = nc_data.get("email")
         user.role = role
-        user.role_commercial = role_commercial
+        # role_commercial is NOT updated - it's managed independently in the database
         user.team_id = team.id if team else None
 
     db.commit()
