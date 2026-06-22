@@ -317,6 +317,7 @@ class CommercialSettings(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    meta = Column(DECIMAL(12, 2), default=0)  # meta de capital individual por mes
     meta_clientes = Column(Integer, default=4)  # meta individual de clientes nuevos por mes
     min_inv = Column(DECIMAL(12, 2), default=50000)  # monto mínimo inversión individual
     comision = Column(DECIMAL(5, 2), default=2.0)  # % comisión individual
