@@ -89,13 +89,8 @@ async def _get_current_user(authorization: str, db: Session):
 
 
 def _is_commercial_user(user: User) -> bool:
-    """Check if user has commercial access (team_id=2 or team_id=7)"""
-    COMMERCIAL_TEAM_ID = 2
-    ADMIN_TEAM_ID = 7
-    return (
-        user.team_id == COMMERCIAL_TEAM_ID or 
-        user.team_id == ADMIN_TEAM_ID
-    )
+    """Check if user has commercial access (role_commercial in admin/commercial)"""
+    return user.role_commercial in ["admin", "commercial"]
 
 
 def _get_or_create_config(db: Session, year: int, month: int) -> CommercialConfig:
@@ -185,20 +180,15 @@ async def get_state(
     
     print(f"[DEBUG] Config found: year={config.year}, month={config.month}")
     
-    # Get all commercial users (team_id=2) or admin team (team_id=7)
-    COMMERCIAL_TEAM_ID = 2
-    ADMIN_TEAM_ID = 7
+    # Get all commercial users (role_commercial = 'commercial' or 'admin')
     users = db.query(User).filter(
         and_(
             User.is_active == True,
-            or_(
-                User.team_id == COMMERCIAL_TEAM_ID,  # Commercial team
-                User.team_id == ADMIN_TEAM_ID         # Or Admin team
-            )
+            User.role_commercial.in_(["commercial", "admin"])
         )
     ).all()
     
-    print(f"[DEBUG] Found {len(users)} commercial users (team_id={COMMERCIAL_TEAM_ID} or team_id={ADMIN_TEAM_ID})")
+    print(f"[DEBUG] Found {len(users)} commercial users (role_commercial in ['commercial', 'admin'])")
     
     comerciales = []
     for u in users:
@@ -287,10 +277,9 @@ async def save_state(
     if not _is_commercial_user(user):
         raise HTTPException(status_code=403, detail="No access to commercial dashboard")
     
-    ADMIN_TEAM_ID = 7
-    is_admin = user.team_id == ADMIN_TEAM_ID
+    is_admin = user.role_commercial == "admin"
     
-    print(f"[DEBUG] POST /state - user: {user.display_name} (id={user.id}), team_id: {user.team_id}, is_admin: {is_admin}")
+    print(f"[DEBUG] POST /state - user: {user.display_name} (id={user.id}), role_commercial: {user.role_commercial}, is_admin: {is_admin}")
     print(f"[DEBUG] POST /state - comerciales count: {len(state.comerciales)}")
     
     try:
@@ -444,9 +433,8 @@ async def get_comercial(
     # Extract user_id from format "u123" -> 123
     user_id = int(comercial_id.replace("u", ""))
     
-    # Check if requesting own data or is admin team
-    ADMIN_TEAM_ID = 7
-    if user.id != user_id and user.team_id != ADMIN_TEAM_ID:
+    # Check if requesting own data or is admin
+    if user.id != user_id and user.role_commercial != "admin":
         raise HTTPException(status_code=403, detail="Can only access own data")
     
     comercial = db.query(User).filter(User.id == user_id).first()
