@@ -33,6 +33,7 @@ class User(Base):
     job_title = Column(String(100), nullable=True)
     team_id = Column(Integer, ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     role = Column(Enum("member", "leader", "admin"), default="member")
+    role_commercial = Column(String(50), nullable=True)  # Derived from team_id: 7→admin, 2→commercial
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
