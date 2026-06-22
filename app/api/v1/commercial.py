@@ -45,6 +45,7 @@ class ComercialData(BaseModel):
     email: Optional[str] = None
     teamId: Optional[int] = None
     role: Optional[str] = None
+    meta: Optional[float] = None       # ← AGREGADO: meta de capital individual
     metaClientes: int
     minInv: float
     comision: float
@@ -236,6 +237,7 @@ async def get_state(
             email=u.email,
             teamId=u.team_id,
             role=u.role,
+            meta=float(settings.meta) if settings.meta is not None else None,  # ← AGREGADO
             metaClientes=settings.meta_clientes,
             minInv=float(settings.min_inv),
             comision=float(settings.comision),
@@ -333,12 +335,15 @@ async def save_state(
                 ).first()
                 
                 if settings:
+                    if comercial.meta is not None:                                  # ← AGREGADO
+                        settings.meta = Decimal(str(comercial.meta))                # ← AGREGADO
                     settings.meta_clientes = comercial.metaClientes
                     settings.min_inv = Decimal(str(comercial.minInv))
                     settings.comision = Decimal(str(comercial.comision))
                 else:
                     settings = CommercialSettings(
                         user_id=user_id,
+                        meta=Decimal(str(comercial.meta)) if comercial.meta is not None else Decimal("0"),  # ← AGREGADO
                         meta_clientes=comercial.metaClientes,
                         min_inv=Decimal(str(comercial.minInv)),
                         comision=Decimal(str(comercial.comision))
