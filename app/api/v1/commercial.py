@@ -180,15 +180,15 @@ async def get_state(
     
     print(f"[DEBUG] Config found: year={config.year}, month={config.month}")
     
-    # Get all commercial users (role_commercial = 'commercial' or 'admin')
+    # Get only commercial users (NOT admins - admins have access but are not comerciales)
     users = db.query(User).filter(
         and_(
             User.is_active == True,
-            User.role_commercial.in_(["commercial", "admin"])
+            User.role_commercial == "commercial"
         )
     ).all()
     
-    print(f"[DEBUG] Found {len(users)} commercial users (role_commercial in ['commercial', 'admin'])")
+    print(f"[DEBUG] Found {len(users)} commercial users (role_commercial = 'commercial')")
     
     comerciales = []
     for u in users:
