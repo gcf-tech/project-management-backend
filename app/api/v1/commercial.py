@@ -41,7 +41,7 @@ class DayData(BaseModel):
 class ComercialData(BaseModel):
     id: str
     userId: int
-    nc_user_id: str  # Nextcloud user ID for matching with session
+    nc_user_id: str  # Nextcloud username for matching with session
     nombre: str
     email: Optional[str] = None
     teamId: Optional[int] = None
@@ -193,6 +193,8 @@ async def get_state(
     
     comerciales = []
     for u in users:
+        print(f"[DEBUG] Processing user: id={u.id}, nc_user_id={u.nc_user_id}, display_name={u.display_name}")
+        
         # Get or create settings
         settings = _get_or_create_settings(db, u.id, config)
         
@@ -226,7 +228,7 @@ async def get_state(
         comerciales.append(ComercialData(
             id=f"u{u.id}",
             userId=u.id,
-            nc_user_id=u.nc_user_id,
+            nc_user_id=u.nc_user_id,  # ← CRITICAL: needed for frontend user matching
             nombre=u.display_name,
             email=u.email,
             teamId=u.team_id,
@@ -237,6 +239,8 @@ async def get_state(
             comision=float(settings.comision),
             dias={k: v.model_dump() for k, v in dias.items()}
         ))
+        
+        print(f"[DEBUG] Added comercial: id=u{u.id}, nc_user_id={u.nc_user_id}, nombre={u.display_name}")
     
     state = StateData(
         config=ConfigData(
@@ -256,6 +260,11 @@ async def get_state(
         ),
         comerciales=comerciales
     )
+    
+    # Debug: Log the first comercial to verify nc_user_id is present
+    if comerciales:
+        first = comerciales[0]
+        print(f"[DEBUG] First comercial in response: id={first.id}, nc_user_id={first.nc_user_id}, nombre={first.nombre}")
     
     return {
         "payload": state.model_dump_json(),
