@@ -41,6 +41,7 @@ class DayData(BaseModel):
 class ComercialData(BaseModel):
     id: str
     userId: int
+    nc_user_id: str  # Nextcloud user ID for matching with session
     nombre: str
     email: Optional[str] = None
     teamId: Optional[int] = None
@@ -225,6 +226,7 @@ async def get_state(
         comerciales.append(ComercialData(
             id=f"u{u.id}",
             userId=u.id,
+            nc_user_id=u.nc_user_id,
             nombre=u.display_name,
             email=u.email,
             teamId=u.team_id,
