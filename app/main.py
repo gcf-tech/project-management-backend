@@ -27,6 +27,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:5174",  # commercial-dashboard dev
         "https://commercial-dashboard.up.railway.app",  # commercial-dashboard prod
+        "https://commercial-dash.gcf.group"
     ],
     allow_credentials=True,
     allow_methods=["*"],
