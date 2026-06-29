@@ -34,6 +34,13 @@ class User(Base):
     team_id = Column(Integer, ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     role = Column(Enum("member", "leader", "admin"), default="member")
     role_commercial = Column(String(50), nullable=True)  # Derived from team_id: 7→admin, 2→commercial
+    # Self-Assessment access level, managed independently (like role_commercial):
+    #   "admin"        → full access to every evaluation + admin modules
+    #   "leader"       → evaluates their assigned team + their own self-evaluation
+    #   "collaborator" → self-evaluation only
+    #   "viewer"       → read-only across the holding
+    #   NULL           → no access to the assessment dashboard
+    assessment_role = Column(String(20), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
@@ -373,4 +380,131 @@ class CommercialDailyData(Base):
         Index("idx_commercial_daily_date", "date"),
         Index("idx_commercial_daily_year_month", "year", "month"),
         Index("idx_commercial_daily_user_year_month", "user_id", "year", "month"),
+    )
+
+
+# ============================================================
+# SELF-ASSESSMENT (Evaluación de Desempeño) MODELS
+# ============================================================
+
+class AssessmentPeriod(Base):
+    """Período (semestre) de evaluación. Espejo de DB.listarPeriodos del front."""
+    __tablename__ = "assessment_periods"
+
+    id = Column(String(20), primary_key=True)          # p.ej. "2026-S1"
+    nombre = Column(String(100), nullable=False)        # "2026 - Semestre 1"
+    estado = Column(Enum("activo", "inactivo", "cerrado"), default="inactivo")
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class AssessmentEmployee(Base):
+    """Catálogo de colaboradores evaluables. Vincula el código del front (p.ej.
+    "0019") con el usuario real (nc_user_id) y guarda los metadatos del cargo
+    que no viven en la tabla users (cargo, área, líder por defecto)."""
+    __tablename__ = "assessment_employees"
+
+    codigo = Column(String(10), primary_key=True)      # "0019"
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    cargo = Column(String(255), nullable=True)
+    area = Column(String(100), nullable=True)
+    lider_default = Column(String(255), nullable=True)  # nombre del líder por defecto
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("idx_assessment_employees_user", "user_id"),
+    )
+
+
+class AssessmentEvaluation(Base):
+    """Evaluación vigente: 1 por colaborador (código) y período."""
+    __tablename__ = "assessment_evaluations"
+
+    id = Column(String(60), primary_key=True)          # "EV_0019_2026S1"
+    codigo = Column(String(10), ForeignKey("assessment_employees.codigo", ondelete="CASCADE"), nullable=False)
+    periodo = Column(String(20), ForeignKey("assessment_periods.id", ondelete="CASCADE"), nullable=False)
+
+    evaluador = Column(String(255), nullable=True)      # nombre del evaluador asignado
+    fecha = Column(String(20), nullable=True)           # fecha de evaluación (ISO yyyy-mm-dd)
+
+    # Estructuras ricas almacenadas como JSON (espejo del objeto `ev` del front)
+    competencias = Column(JSON, nullable=True)          # [{self,lead}] x N
+    kpi = Column(DECIMAL(6, 2), default=0)              # KPI manual (si no hay tabla detalle)
+    politicas = Column(DECIMAL(6, 2), default=0)        # 0-10
+    kpis_detalle = Column(JSON, nullable=True)          # [{nombre,meta,peso,cumplimiento}]
+    fortalezas = Column(Text, nullable=True)
+    oportunidades = Column(Text, nullable=True)
+    comentarios = Column(Text, nullable=True)
+    plan = Column(JSON, nullable=True)                  # {responsable,fecha,estado,seguimiento}
+
+    estado_eval = Column(Enum("Borrador", "Enviada", "Cerrada"), default="Borrador")
+    enviada_por = Column(String(255), nullable=True)
+    enviada_en = Column(DateTime(timezone=True), nullable=True)
+    realizada = Column(Boolean, default=False)
+    version = Column(Integer, default=0)
+
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        Index("unique_codigo_periodo", "codigo", "periodo", unique=True),
+        Index("idx_assessment_eval_periodo", "periodo"),
+    )
+
+
+class AssessmentVersion(Base):
+    """Snapshot inmutable de cada guardado (versionado/auditoría)."""
+    __tablename__ = "assessment_versions"
+
+    vid = Column(Integer, primary_key=True, autoincrement=True)
+    eval_id = Column(String(60), nullable=False)
+    codigo = Column(String(10), nullable=False)
+    periodo = Column(String(20), nullable=False)
+    version = Column(Integer, nullable=False)
+    snapshot = Column(JSON, nullable=False)             # objeto ev completo serializado
+    snapshot_at = Column(DateTime(timezone=True), default=utc_now)
+
+    __table_args__ = (
+        Index("idx_assessment_versions_codigo", "codigo"),
+        Index("idx_assessment_versions_eval", "eval_id"),
+    )
+
+
+class AssessmentEvaluator(Base):
+    """Asignación evaluador↔colaborador por período."""
+    __tablename__ = "assessment_evaluators"
+
+    id = Column(String(60), primary_key=True)          # "AS_0019_2026S1"
+    codigo = Column(String(10), nullable=False)
+    periodo = Column(String(20), nullable=False)
+    evaluador = Column(String(255), nullable=False)     # nombre del evaluador
+    evaluador_anterior = Column(String(255), nullable=True)
+    usuario_cambio = Column(String(255), nullable=True)
+    actualizado = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        Index("unique_evaluator_codigo_periodo", "codigo", "periodo", unique=True),
+        Index("idx_assessment_evaluators_periodo", "periodo"),
+    )
+
+
+class AssessmentAudit(Base):
+    """Bitácora de auditoría de acciones sensibles."""
+    __tablename__ = "assessment_audit"
+
+    aid = Column(Integer, primary_key=True, autoincrement=True)
+    usuario = Column(String(255), nullable=True)
+    accion = Column(String(255), nullable=True)
+    periodo = Column(String(20), nullable=True)
+    valor_anterior = Column(Text, nullable=True)
+    valor_nuevo = Column(Text, nullable=True)
+    detalle = Column(Text, nullable=True)
+    fecha = Column(DateTime(timezone=True), default=utc_now)
+
+    __table_args__ = (
+        Index("idx_assessment_audit_periodo", "periodo"),
     )
