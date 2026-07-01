@@ -41,6 +41,11 @@ class User(Base):
     #   "viewer"       → read-only across the holding
     #   NULL           → no access to the assessment dashboard
     assessment_role = Column(String(20), nullable=True)
+    # Deck (kanban) access level, managed independently (like assessment_role):
+    #   "admin"  → sees & manages every team's board/deck
+    #   "member" → sees own team boards + cards shared with their team
+    #   NULL     → falls back to users.role ('admin' ⇒ all boards, else member scope)
+    deck_role = Column(String(20), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
@@ -441,7 +446,10 @@ class AssessmentEvaluation(Base):
     comentarios = Column(Text, nullable=True)
     plan = Column(JSON, nullable=True)                  # {responsable,fecha,estado,seguimiento}
 
-    estado_eval = Column(Enum("Borrador", "Enviada", "Cerrada"), default="Borrador")
+    # Flujo: Borrador → (evaluado envía) Enviada → (evaluador finaliza) Finalizada.
+    # En "Enviada" el evaluado queda bloqueado pero el evaluador aún edita sus
+    # campos. "Cerrada" se conserva por compatibilidad (no se usa en el flujo nuevo).
+    estado_eval = Column(Enum("Borrador", "Enviada", "Finalizada", "Cerrada"), default="Borrador")
     enviada_por = Column(String(255), nullable=True)
     enviada_en = Column(DateTime(timezone=True), nullable=True)
     realizada = Column(Boolean, default=False)
@@ -507,4 +515,293 @@ class AssessmentAudit(Base):
 
     __table_args__ = (
         Index("idx_assessment_audit_periodo", "periodo"),
+    )
+
+
+# ============================================================
+# DECK (Teamwork Kanban) MODELS
+# ============================================================
+
+class DeckBoard(Base):
+    """One board ("deck") per team. Team membership is NOT recreated here —
+    it lives in users.team_id (see Team / User above)."""
+    __tablename__ = "deck_boards"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(150), nullable=False)
+    description = Column(Text, nullable=True)
+    color = Column(String(20), nullable=True)          # hex accent for UI
+    archived = Column(Boolean, default=False)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    team = relationship("Team")
+    creator = relationship("User", foreign_keys=[created_by])
+    columns = relationship(
+        "DeckColumn", back_populates="board",
+        cascade="all, delete-orphan", order_by="DeckColumn.position",
+    )
+
+    __table_args__ = (
+        # One board per team (drop unique=True if multiple boards/team are wanted later).
+        Index("uq_deck_boards_team", "team_id", unique=True),
+    )
+
+
+class DeckColumn(Base):
+    """A task-list / column on a board (e.g. "Not started", "In progress").
+    User-extensible and reorderable via `position`."""
+    __tablename__ = "deck_columns"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    board_id = Column(Integer, ForeignKey("deck_boards.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(120), nullable=False)
+    position = Column(Integer, nullable=False, default=0)   # 0-based ordering
+    color = Column(String(20), nullable=True)
+    is_default = Column(Boolean, default=False)             # seeded columns
+    wip_limit = Column(Integer, nullable=True)              # optional WIP cap
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    board = relationship("DeckBoard", back_populates="columns")
+    cards = relationship("DeckCard", back_populates="column", order_by="DeckCard.position")
+
+    __table_args__ = (
+        Index("idx_deck_columns_board_pos", "board_id", "position"),
+    )
+
+
+class DeckProject(Base):
+    """Optional grouping a card can link to (cross-column "project" tag)."""
+    __tablename__ = "deck_projects"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(150), nullable=False)
+    color = Column(String(20), nullable=True)
+    archived = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    team = relationship("Team")
+
+    __table_args__ = (
+        Index("idx_deck_projects_team", "team_id"),
+    )
+
+
+class DeckCard(Base):
+    """A card. Multiple assignees/followers/tags/teams via association tables.
+    Orderable within its column via `position`."""
+    __tablename__ = "deck_cards"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    board_id = Column(Integer, ForeignKey("deck_boards.id", ondelete="CASCADE"), nullable=False)
+    column_id = Column(Integer, ForeignKey("deck_columns.id", ondelete="SET NULL"), nullable=True)
+    owner_team_id = Column(Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)  # primary/owner team
+    project_id = Column(Integer, ForeignKey("deck_projects.id", ondelete="SET NULL"), nullable=True)
+
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)               # rich text / markdown
+    position = Column(Integer, nullable=False, default=0)
+    priority = Column(Enum("low", "medium", "high", "urgent"), nullable=True)
+
+    start_date = Column(Date, nullable=True)
+    due_date = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    archived = Column(Boolean, default=False)
+
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    # Idempotency for POST (mirrors Task.client_op_id).
+    client_op_id = Column(String(64), unique=True, nullable=True, index=True)
+
+    board = relationship("DeckBoard")
+    column = relationship("DeckColumn", back_populates="cards")
+    owner_team = relationship("Team", foreign_keys=[owner_team_id])
+    project = relationship("DeckProject")
+    creator = relationship("User", foreign_keys=[created_by])
+
+    assignees = relationship("DeckCardAssignee", cascade="all, delete-orphan", back_populates="card")
+    followers = relationship("DeckCardFollower", cascade="all, delete-orphan", back_populates="card")
+    shared_teams = relationship("DeckCardTeam", cascade="all, delete-orphan", back_populates="card")
+    tags = relationship("DeckCardTag", cascade="all, delete-orphan", back_populates="card")
+    comments = relationship("DeckComment", cascade="all, delete-orphan",
+                            back_populates="card", order_by="DeckComment.created_at")
+    activity = relationship("DeckActivity", cascade="all, delete-orphan",
+                            back_populates="card", order_by="DeckActivity.created_at")
+
+    __table_args__ = (
+        Index("idx_deck_cards_column_pos", "column_id", "position"),
+        Index("idx_deck_cards_board", "board_id"),
+        Index("idx_deck_cards_owner_team", "owner_team_id"),
+        Index("idx_deck_cards_due", "due_date"),
+    )
+
+
+class DeckCardAssignee(Base):
+    """M2M card↔user (multiple assignees)."""
+    __tablename__ = "deck_card_assignees"
+
+    card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    assigned_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    card = relationship("DeckCard", back_populates="assignees")
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("idx_deck_assignee_user", "user_id"),
+    )
+
+
+class DeckCardFollower(Base):
+    """M2M card↔user (followers / watchers to notify)."""
+    __tablename__ = "deck_card_followers"
+
+    card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    card = relationship("DeckCard", back_populates="followers")
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("idx_deck_follower_user", "user_id"),
+    )
+
+
+class DeckCardTeam(Base):
+    """M2M card↔team for cross-team sharing. `is_owner` marks the primary team
+    (also denormalized on DeckCard.owner_team_id for fast filtering)."""
+    __tablename__ = "deck_card_teams"
+
+    card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="CASCADE"), primary_key=True)
+    team_id = Column(Integer, ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True)
+    is_owner = Column(Boolean, default=False)
+    shared_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    card = relationship("DeckCard", back_populates="shared_teams")
+    team = relationship("Team")
+
+    __table_args__ = (
+        Index("idx_deck_card_teams_team", "team_id"),
+    )
+
+
+class DeckTag(Base):
+    """Reusable label/tag, scoped to a board."""
+    __tablename__ = "deck_tags"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    board_id = Column(Integer, ForeignKey("deck_boards.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(60), nullable=False)
+    color = Column(String(20), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    board = relationship("DeckBoard")
+
+    __table_args__ = (
+        Index("uq_deck_tags_board_name", "board_id", "name", unique=True),
+    )
+
+
+class DeckCardTag(Base):
+    """M2M card↔tag."""
+    __tablename__ = "deck_card_tags"
+
+    card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="CASCADE"), primary_key=True)
+    tag_id = Column(Integer, ForeignKey("deck_tags.id", ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    card = relationship("DeckCard", back_populates="tags")
+    tag = relationship("DeckTag")
+
+    __table_args__ = (
+        Index("idx_deck_card_tags_tag", "tag_id"),
+    )
+
+
+class DeckComment(Base):
+    """Comment thread on a card. `mentions` stores mentioned user ids (JSON)
+    so notification fan-out doesn't need a second table."""
+    __tablename__ = "deck_comments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    parent_id = Column(Integer, ForeignKey("deck_comments.id", ondelete="CASCADE"), nullable=True)  # threaded replies
+    body = Column(Text, nullable=False)
+    mentions = Column(JSON, nullable=True)                 # [user_id, ...]
+    edited_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    card = relationship("DeckCard", back_populates="comments")
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("idx_deck_comments_card", "card_id", "created_at"),
+    )
+
+
+class DeckActivity(Base):
+    """Immutable per-card event log (horizontal timeline). Never updated."""
+    __tablename__ = "deck_activity"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="CASCADE"), nullable=False)
+    board_id = Column(Integer, ForeignKey("deck_boards.id", ondelete="CASCADE"), nullable=False)
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    event_type = Column(Enum(
+        "created", "updated", "moved", "assigned", "unassigned",
+        "tagged", "untagged", "due_changed", "start_changed",
+        "completed", "reopened", "commented", "followed", "unfollowed",
+        "shared_team", "unshared_team", "archived", "restored",
+    ), nullable=False)
+    # Structured diff: {"from": ..., "to": ..., "targetUserId": ..., "tag": ...}
+    payload = Column(JSON, nullable=True)
+    message = Column(String(500), nullable=True)           # pre-rendered human string
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    card = relationship("DeckCard", back_populates="activity")
+    actor = relationship("User", foreign_keys=[actor_id])
+
+    __table_args__ = (
+        Index("idx_deck_activity_card", "card_id", "created_at"),
+        Index("idx_deck_activity_board", "board_id", "created_at"),
+    )
+
+
+class DeckNotification(Base):
+    """Per-user notification record generated from activity events."""
+    __tablename__ = "deck_notifications"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)   # recipient
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # who triggered it
+    card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="CASCADE"), nullable=True)
+    activity_id = Column(Integer, ForeignKey("deck_activity.id", ondelete="SET NULL"), nullable=True)
+    type = Column(Enum(
+        "assigned", "mentioned", "comment", "card_updated",
+        "due_soon", "moved", "shared",
+    ), nullable=False)
+    message = Column(String(500), nullable=True)
+    is_read = Column(Boolean, default=False)
+    nc_pushed = Column(Boolean, default=False)             # mirrored to Nextcloud notifications API?
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+    actor = relationship("User", foreign_keys=[actor_id])
+    card = relationship("DeckCard")
+
+    __table_args__ = (
+        Index("idx_deck_notif_user_unread", "user_id", "is_read", "created_at"),
+        Index("idx_deck_notif_card", "card_id"),
     )

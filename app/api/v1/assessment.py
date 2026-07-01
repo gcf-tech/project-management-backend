@@ -329,14 +329,21 @@ async def save_evaluation(
         raise HTTPException(status_code=403, detail="Not allowed to edit this evaluation")
 
     prev_estado = ev.estado_eval if ev else "Borrador"
+    new_estado = body.estadoEval or prev_estado
 
-    # Locked records: only admin or the assigned evaluator may touch them (to reopen).
-    if prev_estado in ("Enviada", "Cerrada"):
-        reopening = (body.estadoEval == "Borrador")
-        if not (ctx.is_admin() or is_evaluator):
-            raise HTTPException(status_code=403, detail="Evaluation is locked")
-        if not reopening and not ctx.is_admin():
-            raise HTTPException(status_code=403, detail="Evaluation is locked")
+    # ── Compuertas de edición por estado ───────────────────────────────────────
+    # Flujo: Borrador → (evaluado envía) Enviada → (evaluador finaliza) Finalizada.
+    #  - El EVALUADO edita su autoevaluación (self) solo mientras está en Borrador.
+    #  - El EVALUADOR edita sus campos mientras NO esté finalizada (Borrador o Enviada),
+    #    sin necesidad de reabrir.
+    subject_can_edit = is_subject and prev_estado == "Borrador"
+    evaluator_can_edit = is_evaluator and prev_estado in ("Borrador", "Enviada")
+
+    # Registros finalizados/cerrados: bloqueados salvo reapertura válida.
+    if prev_estado in ("Finalizada", "Cerrada"):
+        reopening = new_estado == "Borrador" and (ctx.is_admin() or is_evaluator)
+        if not reopening:
+            raise HTTPException(status_code=403, detail="Evaluation is finalized")
 
     if is_new:
         ev = AssessmentEvaluation(
@@ -346,7 +353,7 @@ async def save_evaluation(
         )
         db.add(ev)
 
-    # ── Merge competencias element-wise according to role ──────────────────────
+    # ── Merge competencias elemento a elemento según la compuerta ──────────────
     existing = list(ev.competencias or [])
     incoming = list(body.competencias or [])
     n = max(len(existing), len(incoming))
@@ -356,15 +363,15 @@ async def save_evaluation(
         new = incoming[i] if i < len(incoming) else {}
         self_v = cur.get("self", 0)
         lead_v = cur.get("lead", 0)
-        if is_subject:
+        if subject_can_edit:
             self_v = new.get("self", self_v)
-        if is_evaluator:
+        if evaluator_can_edit:
             lead_v = new.get("lead", lead_v)
         merged.append({"self": self_v, "lead": lead_v})
     ev.competencias = merged
 
-    # ── Evaluator-only scalar fields ───────────────────────────────────────────
-    if is_evaluator:
+    # ── Campos del evaluador ────────────────────────────────────────────────────
+    if evaluator_can_edit:
         ev.evaluador = body.evaluador or ev.evaluador
         ev.fecha = body.fecha if body.fecha is not None else ev.fecha
         ev.politicas = Decimal(str(body.politicas))
@@ -375,24 +382,24 @@ async def save_evaluation(
         ev.comentarios = body.comentarios or ""
         ev.plan = body.plan or {}
 
-    # ── Estado transitions ─────────────────────────────────────────────────────
-    new_estado = body.estadoEval or "Borrador"
+    # ── Transiciones de estado ──────────────────────────────────────────────────
     if new_estado != prev_estado:
-        if new_estado == "Enviada" and is_subject:
+        if new_estado == "Enviada" and is_subject and prev_estado == "Borrador":
             ev.estado_eval = "Enviada"
             ev.enviada_por = ctx.nombre
             ev.enviada_en = utc_now()
-            _audit(db, ctx.nombre, "Envío de evaluación", body.periodo,
+            _audit(db, ctx.nombre, "Envío de autoevaluación", body.periodo,
                    prev_estado, "Enviada", f"Colaborador {body.codigo}")
-        elif new_estado == "Borrador" and (ctx.is_admin() or is_evaluator):
+        elif new_estado == "Finalizada" and is_evaluator and prev_estado in ("Borrador", "Enviada"):
+            ev.estado_eval = "Finalizada"
+            _audit(db, ctx.nombre, "Finalización de evaluación", body.periodo,
+                   prev_estado, "Finalizada", f"Colaborador {body.codigo}")
+        elif new_estado == "Borrador" and (ctx.is_admin() or is_evaluator) \
+                and prev_estado in ("Enviada", "Finalizada", "Cerrada"):
             ev.estado_eval = "Borrador"
             _audit(db, ctx.nombre, "Reapertura de evaluación", body.periodo,
                    prev_estado, "Borrador", f"Colaborador {body.codigo}")
-        elif new_estado == "Cerrada" and ctx.is_admin():
-            ev.estado_eval = "Cerrada"
-            _audit(db, ctx.nombre, "Cierre de evaluación", body.periodo,
-                   prev_estado, "Cerrada", f"Colaborador {body.codigo}")
-        # otherwise ignore disallowed transition (keep prev)
+        # cualquier otra transición se ignora (se conserva prev_estado)
 
     ev.realizada = bool(body.realizada)
     ev.version = (ev.version or 0) + 1

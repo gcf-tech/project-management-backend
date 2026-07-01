@@ -124,3 +124,25 @@ async def fetch_deck_cards(board_id: int, authorization: str) -> list:
                     "stack": stack.get("title", ""),
                 })
         return cards
+
+async def push_nc_notification(authorization: str, nc_user_id: str, subject: str, message: str = "") -> bool:
+    """Best-effort mirror of a Deck notification into the Nextcloud notifications
+    app (bell icon). Uses the admin_notifications API, which requires the calling
+    token to belong to a Nextcloud admin; on any failure we silently return False
+    so the in-app notification remains the source of truth.
+    """
+    url = f"{NC_URL}/ocs/v2.php/apps/notifications/api/v2/admin_notifications/{nc_user_id}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": authorization,
+                    "OCS-APIREQUEST": "true",
+                    "Accept": "application/json",
+                },
+                data={"shortMessage": subject[:255], "longMessage": message[:4000]},
+            )
+            return resp.status_code in (200, 201)
+    except Exception:
+        return False
