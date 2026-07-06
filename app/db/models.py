@@ -1,8 +1,9 @@
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean,
-    Enum, Date, DateTime, DECIMAL, ForeignKey, CheckConstraint, Time, Index, JSON
+    Enum, Date, DateTime, DECIMAL, ForeignKey, CheckConstraint, Time, Index, JSON, LargeBinary
 )
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.mysql import LONGBLOB
 from app.db.database import Base
 from app.core.datetime_utils import utc_now
 
@@ -613,6 +614,8 @@ class DeckCard(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     archived = Column(Boolean, default=False)
 
+    prototype_url = Column(String(500), nullable=True)  # link al prototipo (etapa Prototipado)
+
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
@@ -804,4 +807,66 @@ class DeckNotification(Base):
     __table_args__ = (
         Index("idx_deck_notif_user_unread", "user_id", "is_read", "created_at"),
         Index("idx_deck_notif_card", "card_id"),
+    )
+
+
+class DeckAttachment(Base):
+    """File attached to a card/comment. Binary stored in-DB (LONGBLOB) for
+    simplicity — files are small internal docs/images. Capped in the endpoint."""
+    __tablename__ = "deck_attachments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="CASCADE"), nullable=False)
+    comment_id = Column(Integer, ForeignKey("deck_comments.id", ondelete="CASCADE"), nullable=True)
+    uploaded_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    filename = Column(String(255), nullable=False)
+    content_type = Column(String(120), nullable=True)
+    size = Column(Integer, nullable=True)
+    data = Column(LargeBinary().with_variant(LONGBLOB, "mysql"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+
+    __table_args__ = (
+        Index("idx_deck_attach_card", "card_id"),
+        Index("idx_deck_attach_comment", "comment_id"),
+    )
+
+
+class DeckTimeLog(Base):
+    """Registro de tiempo sobre una card (estilo Teamwork 'log time')."""
+    __tablename__ = "deck_time_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    minutes = Column(Integer, nullable=False, default=0)
+    description = Column(Text, nullable=True)
+    log_date = Column(Date, nullable=True)
+    billable = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("idx_deck_timelog_card", "card_id", "log_date"),
+    )
+
+
+class DeckStageNote(Base):
+    """Nota/comentario interno asociado a una etapa (columna) concreta de la card.
+    Documenta qué pasó en ese estado, aparte del hilo de comentarios general."""
+    __tablename__ = "deck_stage_notes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="CASCADE"), nullable=False)
+    column_id = Column(Integer, ForeignKey("deck_columns.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("idx_deck_stage_notes_card", "card_id", "column_id"),
     )

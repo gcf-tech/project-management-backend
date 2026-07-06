@@ -13,11 +13,12 @@ users.role:
 Team membership is NOT managed here: it lives in users.team_id, synced from
 Nextcloud groups (see app/services/nextcloud_svc.py).
 """
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 from typing import Annotated, List, Optional, Dict, Any
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_db
@@ -39,9 +40,28 @@ from app.db.models import (
     DeckComment,
     DeckActivity,
     DeckNotification,
+    DeckAttachment,
+    DeckTimeLog,
+    DeckStageNote,
 )
 
+MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024  # 15 MB
+
 router = APIRouter()
+
+# Canonical workflow pipeline seeded on every new board (name, color).
+# Flow: Creación → Prototipado → Revisión → Desarrollo → Testing interno →
+#       Testing externo → Documentación → Lanzado (moves back and forth allowed).
+DEFAULT_COLUMNS = [
+    ("Creación", "#8a93a3"),
+    ("Prototipado", "#3b82f6"),
+    ("Revisión", "#e0a11f"),
+    ("Desarrollo", "#F37022"),
+    ("Testing interno", "#8b5cf6"),
+    ("Testing externo", "#14b8a6"),
+    ("Documentación", "#6366f1"),
+    ("Lanzado", "#1f7a44"),
+]
 
 
 # ============================================================
@@ -98,6 +118,18 @@ class CardPatch(BaseModel):
     priority: Optional[str] = None
     startDate: Optional[str] = None
     dueDate: Optional[str] = None
+    prototypeUrl: Optional[str] = None
+
+
+class TimeLogIn(BaseModel):
+    minutes: int
+    description: Optional[str] = None
+    date: Optional[str] = None
+    billable: bool = False
+
+
+class StageNoteIn(BaseModel):
+    body: str
 
 
 class CardMove(BaseModel):
@@ -124,6 +156,7 @@ class CommentIn(BaseModel):
     body: str
     parentId: Optional[int] = None
     mentions: List[int] = Field(default_factory=list)
+    attachmentIds: List[int] = Field(default_factory=list)
 
 
 class CommentPatch(BaseModel):
@@ -250,6 +283,19 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(value[:10] + "T00:00:00+00:00")
 
 
+EDIT_WINDOW = timedelta(minutes=5)
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """MySQL returns naive datetimes; treat them as UTC for comparison."""
+    if dt is None:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+def _within_edit_window(created_at: Optional[datetime]) -> bool:
+    aware = _as_utc(created_at)
+    return aware is not None and (utc_now() - aware) <= EDIT_WINDOW
+
+
 # ============================================================
 # SERIALIZATION
 # ============================================================
@@ -305,6 +351,7 @@ def _serialize_card(card: DeckCard, *, full=False) -> Dict[str, Any]:
         "projectId": card.project_id,
         "title": card.title,
         "description": card.description,
+        "prototypeUrl": card.prototype_url,
         "position": card.position,
         "priority": card.priority,
         "startDate": card.start_date.isoformat() if card.start_date else None,
@@ -317,7 +364,7 @@ def _serialize_card(card: DeckCard, *, full=False) -> Dict[str, Any]:
         "updatedAt": card.updated_at.isoformat() if card.updated_at else None,
     }
     if full:
-        out["followers"] = [a.user_id for a in card.followers]
+        out["followers"] = [_user_brief(f.user) for f in card.followers if f.user]
         out["sharedTeams"] = [
             {"teamId": st.team_id, "name": st.team.name if st.team else None, "isOwner": bool(st.is_owner)}
             for st in card.shared_teams
@@ -329,7 +376,18 @@ def _serialize_card(card: DeckCard, *, full=False) -> Dict[str, Any]:
     return out
 
 
-def _serialize_comment(c: DeckComment) -> Dict[str, Any]:
+def _serialize_attachment(a: DeckAttachment) -> Dict[str, Any]:
+    return {
+        "id": a.id,
+        "filename": a.filename,
+        "contentType": a.content_type,
+        "size": a.size,
+        "isImage": bool(a.content_type and a.content_type.startswith("image/")),
+        "url": f"/api/decks/attachments/{a.id}",
+    }
+
+
+def _serialize_comment(c: DeckComment, attachments: Optional[List[DeckAttachment]] = None) -> Dict[str, Any]:
     return {
         "id": c.id,
         "cardId": c.card_id,
@@ -339,6 +397,8 @@ def _serialize_comment(c: DeckComment) -> Dict[str, Any]:
         "mentions": c.mentions or [],
         "edited": c.edited_at is not None,
         "deleted": c.deleted_at is not None,
+        "editable": _within_edit_window(c.created_at) and c.deleted_at is None,
+        "attachments": [_serialize_attachment(a) for a in (attachments or [])],
         "createdAt": c.created_at.isoformat() if c.created_at else None,
     }
 
@@ -561,8 +621,8 @@ async def create_board(
     )
     db.add(board)
     db.flush()
-    for pos, name in enumerate(["Not started", "In progress"]):
-        db.add(DeckColumn(board_id=board.id, title=name, position=pos, is_default=True,
+    for pos, (name, color) in enumerate(DEFAULT_COLUMNS):
+        db.add(DeckColumn(board_id=board.id, title=name, color=color, position=pos, is_default=True,
                           created_at=utc_now(), updated_at=utc_now()))
     db.commit()
     db.refresh(board)
@@ -793,8 +853,9 @@ async def create_card(
     for tid in dict.fromkeys(body.tagIds):
         if db.query(DeckTag).filter(and_(DeckTag.id == tid, DeckTag.board_id == board_id)).first():
             db.add(DeckCardTag(card_id=card.id, tag_id=tid, created_at=utc_now()))
-    # Creator follows their own card by default.
-    db.add(DeckCardFollower(card_id=card.id, user_id=user.id, created_at=utc_now()))
+    # Default followers = creator + assignees (all get notified of changes).
+    for uid in dict.fromkeys([user.id, *body.assigneeIds]):
+        db.add(DeckCardFollower(card_id=card.id, user_id=uid, created_at=utc_now()))
 
     db.flush()
     db.refresh(card)
@@ -824,6 +885,8 @@ async def patch_card(
         card.project_id = body.projectId
     if body.priority is not None:
         card.priority = body.priority
+    if body.prototypeUrl is not None:
+        card.prototype_url = body.prototypeUrl or None
     if body.startDate is not None:
         card.start_date = _parse_date(body.startDate)
     if body.dueDate is not None:
@@ -989,6 +1052,11 @@ async def add_assignee(
     if not exists:
         db.add(DeckCardAssignee(card_id=card_id, user_id=body.userId,
                                 assigned_by=user.id, created_at=utc_now()))
+        # An assignee automatically follows the card.
+        if not db.query(DeckCardFollower).filter(
+            and_(DeckCardFollower.card_id == card_id, DeckCardFollower.user_id == body.userId)
+        ).first():
+            db.add(DeckCardFollower(card_id=card_id, user_id=body.userId, created_at=utc_now()))
         db.flush()
         db.refresh(card)
         act = _log_activity(db, card, user, "assigned",
@@ -1151,7 +1219,13 @@ async def list_comments(
     _require_see_card(ctx, card)
     rows = db.query(DeckComment).filter(DeckComment.card_id == card_id)\
         .order_by(DeckComment.created_at).all()
-    return {"comments": [_serialize_comment(c) for c in rows]}
+    # Batch-load attachments for these comments.
+    atts = db.query(DeckAttachment).filter(DeckAttachment.card_id == card_id).all()
+    by_comment: Dict[int, List[DeckAttachment]] = {}
+    for a in atts:
+        if a.comment_id:
+            by_comment.setdefault(a.comment_id, []).append(a)
+    return {"comments": [_serialize_comment(c, by_comment.get(c.id)) for c in rows]}
 
 
 @router.post("/cards/{card_id}/comments")
@@ -1165,7 +1239,8 @@ async def add_comment(
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
     _require_write_card(ctx, card)
-    if not body.body.strip():
+    # A comment must have text or at least one attachment.
+    if not body.body.strip() and not body.attachmentIds:
         raise HTTPException(status_code=400, detail="Empty comment")
 
     comment = DeckComment(
@@ -1174,6 +1249,24 @@ async def add_comment(
     )
     db.add(comment)
     db.flush()
+
+    # Link any pre-uploaded attachments belonging to this card.
+    linked = []
+    if body.attachmentIds:
+        linked = db.query(DeckAttachment).filter(
+            and_(DeckAttachment.id.in_(body.attachmentIds), DeckAttachment.card_id == card_id)
+        ).all()
+        for a in linked:
+            a.comment_id = comment.id
+
+    # Users notified via a comment also start following the card.
+    for uid in set(body.mentions or []):
+        exists = db.query(DeckCardFollower).filter(
+            and_(DeckCardFollower.card_id == card_id, DeckCardFollower.user_id == uid)
+        ).first()
+        if not exists:
+            db.add(DeckCardFollower(card_id=card_id, user_id=uid, created_at=utc_now()))
+
     db.refresh(card)
     act = _log_activity(db, card, user, "commented",
                         payload={"commentId": comment.id},
@@ -1182,7 +1275,7 @@ async def add_comment(
     db.commit()
     await _mirror_to_nextcloud(db, authorization, act.id)
     db.refresh(comment)
-    return _serialize_comment(comment)
+    return _serialize_comment(comment, linked)
 
 
 @router.patch("/comments/{comment_id}")
@@ -1199,6 +1292,8 @@ async def edit_comment(
         raise HTTPException(status_code=404, detail="Comment not found")
     if comment.user_id != user.id and not ctx.is_admin():
         raise HTTPException(status_code=403, detail="Can only edit your own comment")
+    if not ctx.is_admin() and not _within_edit_window(comment.created_at):
+        raise HTTPException(status_code=403, detail="El comentario solo se puede editar los primeros 5 minutos")
     comment.body = body.body
     comment.edited_at = utc_now()
     db.commit()
@@ -1219,7 +1314,208 @@ async def delete_comment(
         raise HTTPException(status_code=404, detail="Comment not found")
     if comment.user_id != user.id and not ctx.is_admin():
         raise HTTPException(status_code=403, detail="Can only delete your own comment")
+    if not ctx.is_admin() and not _within_edit_window(comment.created_at):
+        raise HTTPException(status_code=403, detail="El comentario solo se puede eliminar los primeros 5 minutos")
     comment.deleted_at = utc_now()
+    db.commit()
+    return {"success": True}
+
+
+# ============================================================
+# ATTACHMENTS
+# ============================================================
+
+@router.post("/cards/{card_id}/attachments")
+async def upload_attachment(
+    card_id: int,
+    authorization: Annotated[str, Header()],
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Upload a file to a card. Returned id can be passed as attachmentIds when
+    creating a comment. Binary stored in-DB (LONGBLOB), capped at 15 MB."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    card = _get_card_or_404(db, card_id)
+    _require_write_card(ctx, card)
+
+    data = await file.read()
+    if len(data) > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 15 MB)")
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    att = DeckAttachment(
+        card_id=card_id, uploaded_by=user.id,
+        filename=(file.filename or "archivo")[:255],
+        content_type=file.content_type, size=len(data), data=data, created_at=utc_now(),
+    )
+    db.add(att)
+    db.commit()
+    db.refresh(att)
+    return _serialize_attachment(att)
+
+
+@router.get("/attachments/{attachment_id}")
+async def download_attachment(
+    attachment_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    att = db.query(DeckAttachment).filter(DeckAttachment.id == attachment_id).first()
+    if not att:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    card = _get_card_or_404(db, att.card_id)
+    _require_see_card(ctx, card)
+    return Response(
+        content=att.data,
+        media_type=att.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{att.filename}"'},
+    )
+
+
+# ============================================================
+# TIME LOGS
+# ============================================================
+
+def _serialize_timelog(t: DeckTimeLog) -> Dict[str, Any]:
+    return {
+        "id": t.id,
+        "minutes": t.minutes,
+        "description": t.description or "",
+        "date": t.log_date.isoformat() if t.log_date else None,
+        "billable": bool(t.billable),
+        "user": _user_brief(t.user),
+        "createdAt": t.created_at.isoformat() if t.created_at else None,
+    }
+
+
+@router.get("/cards/{card_id}/timelogs")
+async def list_timelogs(
+    card_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    card = _get_card_or_404(db, card_id)
+    _require_see_card(ctx, card)
+    rows = db.query(DeckTimeLog).filter(DeckTimeLog.card_id == card_id)\
+        .order_by(DeckTimeLog.log_date.desc(), DeckTimeLog.created_at.desc()).all()
+    total = sum(t.minutes for t in rows)
+    return {"timelogs": [_serialize_timelog(t) for t in rows], "totalMinutes": total}
+
+
+@router.post("/cards/{card_id}/timelogs")
+async def add_timelog(
+    card_id: int,
+    body: TimeLogIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    card = _get_card_or_404(db, card_id)
+    _require_write_card(ctx, card)
+    if body.minutes <= 0:
+        raise HTTPException(status_code=400, detail="El tiempo debe ser mayor a 0")
+    tl = DeckTimeLog(
+        card_id=card_id, user_id=user.id, minutes=body.minutes,
+        description=body.description, log_date=_parse_date(body.date) or date.today(),
+        billable=body.billable, created_at=utc_now(),
+    )
+    db.add(tl)
+    db.commit()
+    db.refresh(tl)
+    return _serialize_timelog(tl)
+
+
+@router.delete("/timelogs/{timelog_id}")
+async def delete_timelog(
+    timelog_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    tl = db.query(DeckTimeLog).filter(DeckTimeLog.id == timelog_id).first()
+    if not tl:
+        raise HTTPException(status_code=404, detail="Time log not found")
+    if tl.user_id != user.id and not ctx.is_admin():
+        raise HTTPException(status_code=403, detail="Solo puedes borrar tu propio registro")
+    db.delete(tl)
+    db.commit()
+    return {"success": True}
+
+
+# ============================================================
+# STAGE NOTES (comentarios internos por etapa)
+# ============================================================
+
+def _serialize_stage_note(n: DeckStageNote) -> Dict[str, Any]:
+    return {
+        "id": n.id,
+        "columnId": n.column_id,
+        "author": _user_brief(n.user),
+        "body": n.body,
+        "createdAt": n.created_at.isoformat() if n.created_at else None,
+    }
+
+
+@router.get("/cards/{card_id}/stage-notes")
+async def list_stage_notes(
+    card_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    card = _get_card_or_404(db, card_id)
+    _require_see_card(ctx, card)
+    rows = db.query(DeckStageNote).filter(DeckStageNote.card_id == card_id)\
+        .order_by(DeckStageNote.created_at).all()
+    return {"notes": [_serialize_stage_note(n) for n in rows]}
+
+
+@router.post("/cards/{card_id}/stages/{column_id}/notes")
+async def add_stage_note(
+    card_id: int,
+    column_id: int,
+    body: StageNoteIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    card = _get_card_or_404(db, card_id)
+    _require_write_card(ctx, card)
+    if not body.body.strip():
+        raise HTTPException(status_code=400, detail="Nota vacía")
+    if not db.query(DeckColumn).filter(and_(DeckColumn.id == column_id, DeckColumn.board_id == card.board_id)).first():
+        raise HTTPException(status_code=400, detail="Etapa no pertenece al board")
+    note = DeckStageNote(card_id=card_id, column_id=column_id, user_id=user.id, body=body.body, created_at=utc_now())
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return _serialize_stage_note(note)
+
+
+@router.delete("/stage-notes/{note_id}")
+async def delete_stage_note(
+    note_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    note = db.query(DeckStageNote).filter(DeckStageNote.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if note.user_id != user.id and not ctx.is_admin():
+        raise HTTPException(status_code=403, detail="Solo puedes borrar tu propia nota")
+    db.delete(note)
     db.commit()
     return {"success": True}
 

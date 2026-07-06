@@ -17,3 +17,4 @@ redis>=5.0.0
 # Excel export for performance reports
 xlsxwriter==3.2.0
 openpyxl>=3.1
+python-multipart

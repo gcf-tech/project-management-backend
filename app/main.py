@@ -51,7 +51,7 @@ app.include_router(config_router.router, prefix="/config")
 app.include_router(reports.router,      prefix="/api/v1")
 app.include_router(commercial.router,   prefix="/api/commercial")
 app.include_router(assessment.router,   prefix="/api/assessment")
-app.include_router(deck.router,         prefix="/api/deck")
+app.include_router(deck.router,         prefix="/api/decks")  # /api/deck is a legacy NC-proxy in teams.py
 
 
 @app.get("/health")
