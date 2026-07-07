@@ -79,3 +79,17 @@ CACHE_STALE_THRESHOLD = float(os.getenv("CACHE_STALE_THRESHOLD", "0.7"))
 # Redis connection (optional). When set, the calendar cache uses Redis;
 # otherwise it falls back to a per-process in-memory TTL cache.
 REDIS_URL = os.getenv("REDIS_URL", "")
+
+# ── SMTP / email notifications (Deck) ───────────────────────────────────────
+# Envío de correos de notificación (no-reply). Reusa las vars QQCAPITALFUND* si
+# ya existen en el entorno, o las SMTP_* dedicadas.
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_USER = os.getenv("SMTP_USER") or os.getenv("QQCAPITALFUNDEMAIL", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD") or os.getenv("QQCAPITALFUNDPASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "GCF Deck")
+# URL del frontend Deck para los enlaces de los correos.
+DECK_APP_URL = os.getenv("DECK_APP_URL", "https://deck.gcf.group/app/")
+# El email se envía solo si hay credenciales configuradas.
+EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASSWORD)

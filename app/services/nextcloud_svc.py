@@ -47,6 +47,8 @@ async def sync_user_from_nextcloud(db: Session, nc_data: dict, authorization: st
             email=nc_data.get("email"),
             role=role,
             role_commercial=None,  # Manual field, not synced from Nextcloud
+            # team_id sólo se siembra en la CREACIÓN del usuario (default inicial
+            # desde el grupo de Nextcloud). En logins posteriores NO se toca.
             team_id=team.id if team else None,
         )
         db.add(user)
@@ -54,8 +56,9 @@ async def sync_user_from_nextcloud(db: Session, nc_data: dict, authorization: st
         user.display_name = nc_data.get("displayname", nc_data["id"])
         user.email = nc_data.get("email")
         user.role = role
-        # role_commercial is NOT updated - it's managed independently in the database
-        user.team_id = team.id if team else None
+        # role_commercial y team_id NO se actualizan: son manuales en la BD.
+        # (team_id se dejó de sincronizar desde los grupos de Nextcloud para que
+        #  las asignaciones manuales de equipo no se reviertan en cada login.)
 
     db.commit()
     db.refresh(user)

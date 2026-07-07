@@ -13,6 +13,7 @@ users.role:
 Team membership is NOT managed here: it lives in users.team_id, synced from
 Nextcloud groups (see app/services/nextcloud_svc.py).
 """
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -24,6 +25,7 @@ from pydantic import BaseModel, Field
 from app.api.dependencies import get_db
 from app.core.security import get_nc_user_info
 from app.services.nextcloud_svc import push_nc_notification
+from app.services.email_svc import send_email, build_notification_email
 from app.core.datetime_utils import utc_now
 from app.db.models import (
     User,
@@ -53,14 +55,14 @@ router = APIRouter()
 # Flow: Creación → Prototipado → Revisión → Desarrollo → Testing interno →
 #       Testing externo → Documentación → Lanzado (moves back and forth allowed).
 DEFAULT_COLUMNS = [
-    ("Creación", "#8a93a3"),
-    ("Prototipado", "#3b82f6"),
-    ("Revisión", "#e0a11f"),
-    ("Desarrollo", "#F37022"),
-    ("Testing interno", "#8b5cf6"),
-    ("Testing externo", "#14b8a6"),
-    ("Documentación", "#6366f1"),
-    ("Lanzado", "#1f7a44"),
+    ("Creación", "#8a93a3", 0),
+    ("Prototipado", "#3b82f6", 180),
+    ("Revisión", "#e0a11f", 120),
+    ("Desarrollo", "#F37022", 480),
+    ("Testing interno", "#8b5cf6", 120),
+    ("Testing externo", "#14b8a6", 120),
+    ("Documentación", "#6366f1", 60),
+    ("Lanzado", "#1f7a44", 0),
 ]
 
 
@@ -86,12 +88,14 @@ class ColumnIn(BaseModel):
     title: str
     color: Optional[str] = None
     wipLimit: Optional[int] = None
+    defaultMinutes: Optional[int] = None
 
 
 class ColumnPatch(BaseModel):
     title: Optional[str] = None
     color: Optional[str] = None
     wipLimit: Optional[int] = None
+    defaultMinutes: Optional[int] = None
 
 
 class ColumnMove(BaseModel):
@@ -324,6 +328,7 @@ def _serialize_column(col: DeckColumn) -> Dict[str, Any]:
         "color": col.color,
         "isDefault": bool(col.is_default),
         "wipLimit": col.wip_limit,
+        "defaultMinutes": col.default_minutes or 0,
     }
 
 
@@ -481,28 +486,47 @@ def _log_activity(db: Session, card: DeckCard, actor: Optional[User], event_type
     return act
 
 
-async def _mirror_to_nextcloud(db: Session, authorization: str, activity_id: int) -> None:
-    """Best-effort: push the just-created in-app notifications for an activity to
-    Nextcloud's notification bell, then mark them nc_pushed. Failures are swallowed
-    so the in-app channel stays authoritative."""
+async def _dispatch_external(db: Session, authorization: str, activity_id: int) -> None:
+    """Best-effort: para las notificaciones recién creadas de una actividad,
+    (1) las refleja en la campana de Nextcloud y (2) envía correo a cada
+    destinatario. Cualquier fallo se ignora; el canal in-app es la fuente de
+    verdad."""
     rows = db.query(DeckNotification, User).join(
         User, DeckNotification.user_id == User.id
-    ).filter(
-        and_(DeckNotification.activity_id == activity_id, DeckNotification.nc_pushed.is_(False))
-    ).all()
+    ).filter(DeckNotification.activity_id == activity_id).all()
     if not rows:
         return
-    pushed_any = False
+
+    # Título de la card (para el correo).
+    card_id = rows[0][0].card_id
+    card_title = None
+    if card_id:
+        r = db.query(DeckCard.title).filter(DeckCard.id == card_id).first()
+        card_title = r[0] if r else None
+
+    changed = False
+    emails = []
     for notif, recipient in rows:
-        ok = await push_nc_notification(
-            authorization, recipient.nc_user_id,
-            subject=notif.message or "Deck", message="",
-        )
-        if ok:
-            notif.nc_pushed = True
-            pushed_any = True
-    if pushed_any:
+        # (1) Nextcloud bell (requiere token admin; suele fallar silenciosamente).
+        if not notif.nc_pushed:
+            ok = await push_nc_notification(
+                authorization, recipient.nc_user_id,
+                subject=notif.message or "Deck", message="",
+            )
+            if ok:
+                notif.nc_pushed = True
+                changed = True
+        # (2) Correo (no-reply) — se prepara aquí y se envía en segundo plano.
+        if recipient.email:
+            subject, html, text = build_notification_email(
+                recipient.display_name, notif.type, notif.message or "Tienes una actualización en Deck.", card_title,
+            )
+            emails.append((recipient.email, subject, html, text))
+    if changed:
         db.commit()
+    # Enviar correos sin bloquear la respuesta del usuario.
+    for to, subject, html, text in emails:
+        asyncio.create_task(send_email(to, subject, html, text))
 
 
 def _next_position(db: Session, model, **filters) -> int:
@@ -565,23 +589,27 @@ async def board_members(
     authorization: Annotated[str, Header()],
     db: Session = Depends(get_db),
 ):
-    """Users assignable on this board: members of the owner team plus members
-    of any team the board's cards are shared with."""
+    """All active users in the company, so anyone can be assigned/followed.
+    Members of the board's team (and shared teams) are flagged `sameTeam` and
+    returned first so the picker shows the local team on top."""
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     board = _get_board_or_404(db, board_id)
     _require_see_board(ctx, board)
 
-    team_ids = {board.team_id}
-    shared = db.query(DeckCardTeam.team_id).join(
-        DeckCard, DeckCard.id == DeckCardTeam.card_id
-    ).filter(DeckCard.board_id == board_id).distinct().all()
-    team_ids |= {row[0] for row in shared}
-
-    members = db.query(User).filter(
-        and_(User.team_id.in_(team_ids), User.is_active.is_(True))
-    ).order_by(User.display_name).all()
-    return {"members": [_user_brief(m) for m in members]}
+    users = db.query(User).filter(User.is_active.is_(True)).order_by(User.display_name).all()
+    out = []
+    for m in users:
+        brief = _user_brief(m)
+        # "Mismo equipo" = SOLO el equipo dueño del board (no los equipos con los
+        # que se comparten cards; si no, quienes reciben una card compartida
+        # aparecerían como del equipo del board).
+        brief["sameTeam"] = (m.team_id == board.team_id)
+        brief["teamId"] = m.team_id
+        out.append(brief)
+    # Same-team first, then alphabetical (already alpha from the query).
+    out.sort(key=lambda b: (not b["sameTeam"],))
+    return {"members": out}
 
 
 @router.get("/boards/{board_id}")
@@ -621,9 +649,9 @@ async def create_board(
     )
     db.add(board)
     db.flush()
-    for pos, (name, color) in enumerate(DEFAULT_COLUMNS):
+    for pos, (name, color, mins) in enumerate(DEFAULT_COLUMNS):
         db.add(DeckColumn(board_id=board.id, title=name, color=color, position=pos, is_default=True,
-                          created_at=utc_now(), updated_at=utc_now()))
+                          default_minutes=mins, created_at=utc_now(), updated_at=utc_now()))
     db.commit()
     db.refresh(board)
     return _serialize_board(board, with_columns=True)
@@ -687,6 +715,7 @@ async def create_column(
 
     col = DeckColumn(
         board_id=board_id, title=body.title, color=body.color, wip_limit=body.wipLimit,
+        default_minutes=body.defaultMinutes or 0,
         position=_next_position(db, DeckColumn, board_id=board_id),
         created_at=utc_now(), updated_at=utc_now(),
     )
@@ -716,6 +745,8 @@ async def patch_column(
         col.color = body.color
     if body.wipLimit is not None:
         col.wip_limit = body.wipLimit
+    if body.defaultMinutes is not None:
+        col.default_minutes = max(0, body.defaultMinutes)
     col.updated_at = utc_now()
     db.commit()
     db.refresh(col)
@@ -834,7 +865,7 @@ async def create_card(
     card = DeckCard(
         board_id=board_id, column_id=column_id, owner_team_id=board.team_id,
         project_id=body.projectId, title=body.title, description=body.description,
-        priority=body.priority, start_date=_parse_date(body.startDate),
+        priority=body.priority, start_date=_parse_dt(body.startDate),
         due_date=_parse_dt(body.dueDate),
         position=_next_position(db, DeckCard, column_id=column_id) if column_id else 0,
         created_by=user.id, client_op_id=body.clientOpId,
@@ -888,7 +919,7 @@ async def patch_card(
     if body.prototypeUrl is not None:
         card.prototype_url = body.prototypeUrl or None
     if body.startDate is not None:
-        card.start_date = _parse_date(body.startDate)
+        card.start_date = _parse_dt(body.startDate)
     if body.dueDate is not None:
         old_due = card.due_date
         card.due_date = _parse_dt(body.dueDate)
@@ -1065,7 +1096,7 @@ async def add_assignee(
                             extra_recipients={body.userId})
     db.commit()
     if act is not None:
-        await _mirror_to_nextcloud(db, authorization, act.id)
+        await _dispatch_external(db, authorization, act.id)
     db.refresh(card)
     return _serialize_card(card, full=True)
 
@@ -1273,7 +1304,7 @@ async def add_comment(
                         message=f"{user.display_name} commented",
                         extra_recipients=set(body.mentions or []))
     db.commit()
-    await _mirror_to_nextcloud(db, authorization, act.id)
+    await _dispatch_external(db, authorization, act.id)
     db.refresh(comment)
     return _serialize_comment(comment, linked)
 
@@ -1852,7 +1883,7 @@ async def share_card(
                             extra_recipients=member_ids)
     db.commit()
     if act is not None:
-        await _mirror_to_nextcloud(db, authorization, act.id)
+        await _dispatch_external(db, authorization, act.id)
     db.refresh(card)
     return _serialize_card(card, full=True)
 

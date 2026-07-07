@@ -563,6 +563,7 @@ class DeckColumn(Base):
     color = Column(String(20), nullable=True)
     is_default = Column(Boolean, default=False)             # seeded columns
     wip_limit = Column(Integer, nullable=True)              # optional WIP cap
+    default_minutes = Column(Integer, nullable=True, default=0)  # tiempo estimado de la etapa
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
@@ -609,7 +610,7 @@ class DeckCard(Base):
     position = Column(Integer, nullable=False, default=0)
     priority = Column(Enum("low", "medium", "high", "urgent"), nullable=True)
 
-    start_date = Column(Date, nullable=True)
+    start_date = Column(DateTime(timezone=True), nullable=True)  # con hora
     due_date = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     archived = Column(Boolean, default=False)
