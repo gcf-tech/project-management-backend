@@ -604,6 +604,9 @@ class DeckCard(Base):
     column_id = Column(Integer, ForeignKey("deck_columns.id", ondelete="SET NULL"), nullable=True)
     owner_team_id = Column(Integer, ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)  # primary/owner team
     project_id = Column(Integer, ForeignKey("deck_projects.id", ondelete="SET NULL"), nullable=True)
+    # Subtarea de otra card (puede vivir en OTRO board y adoptar su flujo). Al
+    # borrar el padre, las subtareas se desvinculan (SET NULL), no se borran.
+    parent_card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="SET NULL"), nullable=True)
 
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)               # rich text / markdown
@@ -643,6 +646,7 @@ class DeckCard(Base):
         Index("idx_deck_cards_board", "board_id"),
         Index("idx_deck_cards_owner_team", "owner_team_id"),
         Index("idx_deck_cards_due", "due_date"),
+        Index("idx_deck_cards_parent", "parent_card_id"),
     )
 
 

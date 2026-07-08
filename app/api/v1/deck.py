@@ -17,7 +17,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, case
 from typing import Annotated, List, Optional, Dict, Any
 from datetime import datetime, date, timedelta, timezone
 from pydantic import BaseModel, Field
@@ -141,6 +141,17 @@ class CardMove(BaseModel):
     position: int
 
 
+class SubtaskIn(BaseModel):
+    title: str
+    boardId: Optional[int] = None   # board destino; por defecto el del equipo del usuario
+    description: Optional[str] = None
+    priority: Optional[str] = None
+    startDate: Optional[str] = None
+    dueDate: Optional[str] = None
+    columnId: Optional[int] = None
+    assigneeIds: List[int] = Field(default_factory=list)
+
+
 class AssigneeIn(BaseModel):
     userId: int
 
@@ -256,6 +267,18 @@ def _require_see_card(ctx: DeckContext, card: DeckCard):
         raise HTTPException(status_code=403, detail="No access to this card")
 
 
+def _require_see_card_or_parent(db: Session, ctx: DeckContext, card: DeckCard):
+    """Visible si el usuario puede ver la card, o si es una subtarea cuyo padre
+    puede ver (para que el equipo del proyecto vea las subtareas de otros)."""
+    if ctx.can_see_card(card):
+        return
+    if card.parent_card_id:
+        parent = db.query(DeckCard).filter(DeckCard.id == card.parent_card_id).first()
+        if parent and ctx.can_see_card(parent):
+            return
+    raise HTTPException(status_code=403, detail="No access to this card")
+
+
 def _require_write_card(ctx: DeckContext, card: DeckCard):
     if not ctx.can_write_card(card):
         raise HTTPException(status_code=403, detail="Not allowed to edit this card")
@@ -347,7 +370,7 @@ def _serialize_board(board: DeckBoard, *, with_columns=False) -> Dict[str, Any]:
     return out
 
 
-def _serialize_card(card: DeckCard, *, full=False) -> Dict[str, Any]:
+def _serialize_card(card: DeckCard, *, full=False, sub=None) -> Dict[str, Any]:
     out = {
         "id": card.id,
         "boardId": card.board_id,
@@ -357,6 +380,7 @@ def _serialize_card(card: DeckCard, *, full=False) -> Dict[str, Any]:
         "title": card.title,
         "description": card.description,
         "prototypeUrl": card.prototype_url,
+        "parentCardId": card.parent_card_id,
         "position": card.position,
         "priority": card.priority,
         "startDate": card.start_date.isoformat() if card.start_date else None,
@@ -378,7 +402,24 @@ def _serialize_card(card: DeckCard, *, full=False) -> Dict[str, Any]:
         out["activityCount"] = len(card.activity)
     else:
         out["commentCount"] = sum(1 for c in card.comments if not c.deleted_at)
+    if sub is not None:
+        out["subtaskCount"] = sub.get("count", 0)
+        out["subtaskDone"] = sub.get("done", 0)
     return out
+
+
+def _subtask_rollup(db: Session, card_ids: List[int]) -> Dict[int, Dict[str, int]]:
+    """Conteo de subtareas (total y completadas) por card padre, en un solo query."""
+    if not card_ids:
+        return {}
+    rows = db.query(
+        DeckCard.parent_card_id,
+        func.count(DeckCard.id),
+        func.sum(case((DeckCard.completed_at.isnot(None), 1), else_=0)),
+    ).filter(
+        and_(DeckCard.parent_card_id.in_(card_ids), DeckCard.archived.is_(False))
+    ).group_by(DeckCard.parent_card_id).all()
+    return {pid: {"count": int(cnt or 0), "done": int(done or 0)} for pid, cnt, done in rows}
 
 
 def _serialize_attachment(a: DeckAttachment) -> Dict[str, Any]:
@@ -819,7 +860,8 @@ async def list_cards(
     board = _get_board_or_404(db, board_id)
     _require_see_board(ctx, board)
     cards = _load_board_cards(db, ctx, board)
-    return {"cards": [_serialize_card(c) for c in cards]}
+    roll = _subtask_rollup(db, [c.id for c in cards])
+    return {"cards": [_serialize_card(c, sub=roll.get(c.id)) for c in cards]}
 
 
 @router.get("/cards/{card_id}")
@@ -831,8 +873,127 @@ async def get_card(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_see_card(ctx, card)
-    return _serialize_card(card, full=True)
+    _require_see_card_or_parent(db, ctx, card)
+    roll = _subtask_rollup(db, [card.id]).get(card.id)
+    return _serialize_card(card, full=True, sub=roll)
+
+
+# ============================================================
+# SUBTASKS (subtareas: cards hijas que pueden vivir en otro board)
+# ============================================================
+
+def _serialize_subtask(card: DeckCard) -> Dict[str, Any]:
+    out = _serialize_card(card)
+    out["columnTitle"] = card.column.title if card.column else None
+    out["columnColor"] = card.column.color if card.column else None
+    out["boardTitle"] = card.board.title if card.board else None
+    out["teamName"] = card.owner_team.name if card.owner_team else None
+    return out
+
+
+@router.get("/cards/{card_id}/subtasks")
+async def list_subtasks(
+    card_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    parent = _get_card_or_404(db, card_id)
+    _require_see_card_or_parent(db, ctx, parent)
+    rows = db.query(DeckCard).filter(
+        and_(DeckCard.parent_card_id == card_id, DeckCard.archived.is_(False))
+    ).order_by(DeckCard.created_at).all()
+    return {"subtasks": [_serialize_subtask(c) for c in rows]}
+
+
+def _resolve_subtask_board(db: Session, ctx: DeckContext, user: User, parent: DeckCard, board_id: Optional[int]) -> DeckBoard:
+    """Board destino de una subtarea: el indicado, si no el del equipo del
+    usuario (adopta su flujo), y si no, el del padre."""
+    board = None
+    if board_id:
+        board = _get_board_or_404(db, board_id)
+    elif user.team_id:
+        board = db.query(DeckBoard).filter(DeckBoard.team_id == user.team_id).first()
+    if not board:
+        board = db.query(DeckBoard).filter(DeckBoard.id == parent.board_id).first()
+    if not board:
+        raise HTTPException(status_code=404, detail="No hay board destino")
+    if not ctx.is_owner_team(board.team_id):
+        raise HTTPException(status_code=403, detail="No puedes crear subtareas en ese board")
+    return board
+
+
+@router.get("/cards/{card_id}/subtask-context")
+async def subtask_context(
+    card_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Board destino (columnas + miembros) para el wizard de nueva subtarea."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    parent = _get_card_or_404(db, card_id)
+    _require_see_card_or_parent(db, ctx, parent)
+    board = _resolve_subtask_board(db, ctx, user, parent, None)
+    cols = db.query(DeckColumn).filter(DeckColumn.board_id == board.id).order_by(DeckColumn.position).all()
+    users = db.query(User).filter(User.is_active.is_(True)).order_by(User.display_name).all()
+    members = []
+    for m in users:
+        b = _user_brief(m); b["sameTeam"] = (m.team_id == board.team_id); b["teamId"] = m.team_id
+        members.append(b)
+    members.sort(key=lambda b: (not b["sameTeam"],))
+    return {
+        "boardId": board.id, "boardTitle": board.title, "teamName": board.team.name if board.team else None,
+        "columns": [_serialize_column(c) for c in cols], "members": members,
+    }
+
+
+@router.post("/cards/{card_id}/subtasks")
+async def create_subtask(
+    card_id: int,
+    body: SubtaskIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Crea una subtarea de una card (con los campos completos del wizard)."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    parent = _get_card_or_404(db, card_id)
+    _require_see_card_or_parent(db, ctx, parent)
+    if not body.title.strip():
+        raise HTTPException(status_code=400, detail="Título requerido")
+
+    board = _resolve_subtask_board(db, ctx, user, parent, body.boardId)
+
+    # Columna: la indicada si pertenece al board, si no la primera.
+    col = None
+    if body.columnId:
+        col = db.query(DeckColumn).filter(and_(DeckColumn.id == body.columnId, DeckColumn.board_id == board.id)).first()
+    if not col:
+        col = db.query(DeckColumn).filter(DeckColumn.board_id == board.id).order_by(DeckColumn.position).first()
+
+    card = DeckCard(
+        board_id=board.id, column_id=col.id if col else None,
+        owner_team_id=board.team_id, parent_card_id=parent.id,
+        title=body.title.strip(), description=body.description, priority=body.priority,
+        start_date=_parse_dt(body.startDate), due_date=_parse_dt(body.dueDate),
+        position=_next_position(db, DeckCard, column_id=col.id) if col else 0,
+        created_by=user.id, created_at=utc_now(), updated_at=utc_now(),
+    )
+    db.add(card)
+    db.flush()
+    db.add(DeckCardTeam(card_id=card.id, team_id=board.team_id, is_owner=True, shared_by=user.id, created_at=utc_now()))
+    for uid in dict.fromkeys(body.assigneeIds):
+        db.add(DeckCardAssignee(card_id=card.id, user_id=uid, assigned_by=user.id, created_at=utc_now()))
+    for uid in dict.fromkeys([user.id, *body.assigneeIds]):
+        db.add(DeckCardFollower(card_id=card.id, user_id=uid, created_at=utc_now()))
+    db.flush()
+    db.refresh(card)
+    _log_activity(db, card, user, "created", message=f"{user.display_name} creó esta subtarea", notify=False)
+    db.commit()
+    db.refresh(card)
+    return _serialize_subtask(card)
 
 
 @router.post("/boards/{board_id}/cards")
@@ -984,9 +1145,21 @@ async def complete_card(
     card.completed_at = utc_now()
     card.updated_at = utc_now()
     _log_activity(db, card, user, "completed", message=f"{user.display_name} completed this card")
+    # Si es una subtarea, avisar a los followers del padre.
+    parent_act = None
+    if card.parent_card_id:
+        parent = db.query(DeckCard).filter(DeckCard.id == card.parent_card_id).first()
+        if parent:
+            parent_act = _log_activity(
+                db, parent, user, "updated",
+                message=f"Subtarea completada: “{card.title}” ({card.owner_team.name if card.owner_team else 'equipo'})",
+            )
     db.commit()
+    if parent_act is not None:
+        await _dispatch_external(db, authorization, parent_act.id)
     db.refresh(card)
-    return _serialize_card(card, full=True)
+    roll = _subtask_rollup(db, [card.id]).get(card.id)
+    return _serialize_card(card, full=True, sub=roll)
 
 
 @router.post("/cards/{card_id}/reopen")
