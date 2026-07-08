@@ -42,7 +42,9 @@ DB_USER = os.getenv("DB_USER", "root")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_NAME = os.getenv("DB_NAME", "activity_tracker")
 
-DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# charset=utf8mb4 es imprescindible: sin él pymysql no garantiza UTF-8 y las
+# tildes/ñ de textos en español se pierden al escribir (p.ej. "Administración"→"Administracin").
+DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
 
 BUSINESS_TIMEZONE  = "America/New_York"
 BUSINESS_HOUR_START = 8
