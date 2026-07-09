@@ -141,6 +141,10 @@ class CardMove(BaseModel):
     position: int
 
 
+class ListOrderIn(BaseModel):
+    orderedIds: List[int]
+
+
 class SubtaskIn(BaseModel):
     title: str
     boardId: Optional[int] = None   # board destino; por defecto el del equipo del usuario
@@ -381,6 +385,7 @@ def _serialize_card(card: DeckCard, *, full=False, sub=None) -> Dict[str, Any]:
         "description": card.description,
         "prototypeUrl": card.prototype_url,
         "parentCardId": card.parent_card_id,
+        "listOrder": card.list_order,
         "position": card.position,
         "priority": card.priority,
         "startDate": card.start_date.isoformat() if card.start_date else None,
@@ -862,6 +867,28 @@ async def list_cards(
     cards = _load_board_cards(db, ctx, board)
     roll = _subtask_rollup(db, [c.id for c in cards])
     return {"cards": [_serialize_card(c, sub=roll.get(c.id)) for c in cards]}
+
+
+@router.post("/boards/{board_id}/list-order")
+async def set_list_order(
+    board_id: int,
+    body: ListOrderIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Guarda el orden manual de la lista 'En curso': list_order = índice."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    board = _get_board_or_404(db, board_id)
+    _require_owner_team(ctx, board.team_id)
+    pos = {cid: i for i, cid in enumerate(body.orderedIds)}
+    rows = db.query(DeckCard).filter(
+        and_(DeckCard.id.in_(body.orderedIds or [0]), DeckCard.board_id == board_id)
+    ).all()
+    for c in rows:
+        c.list_order = pos.get(c.id)
+    db.commit()
+    return {"success": True}
 
 
 @router.get("/cards/{card_id}")
@@ -1741,6 +1768,54 @@ async def card_activity(
     rows = db.query(DeckActivity).filter(DeckActivity.card_id == card_id)\
         .order_by(DeckActivity.created_at).all()
     return {"activity": [_serialize_activity(a) for a in rows]}
+
+
+@router.delete("/activity/{activity_id}")
+async def delete_activity(
+    activity_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Elimina un registro del historial/flujo (afecta diagrama e historial).
+    Solo admins, para curar datos de prueba o errores."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    if not ctx.is_admin():
+        raise HTTPException(status_code=403, detail="Solo un admin puede borrar registros del historial")
+    act = db.query(DeckActivity).filter(DeckActivity.id == activity_id).first()
+    if not act:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    card_id = act.card_id
+    was_move = act.event_type == "moved"
+    db.query(DeckNotification).filter(DeckNotification.activity_id == activity_id)\
+        .update({DeckNotification.activity_id: None}, synchronize_session=False)
+    db.delete(act)
+    db.flush()
+
+    # Si se borró un movimiento, recomputar la etapa actual con el último 'moved'
+    # que quede (para que la card vuelva al estado previo, no solo el diagrama).
+    if was_move:
+        card = db.query(DeckCard).filter(DeckCard.id == card_id).first()
+        if card:
+            last = db.query(DeckActivity).filter(
+                and_(DeckActivity.card_id == card_id, DeckActivity.event_type == "moved")
+            ).order_by(DeckActivity.created_at.desc()).first()
+            cols = db.query(DeckColumn).filter(DeckColumn.board_id == card.board_id)\
+                .order_by(DeckColumn.position).all()
+            new_col = None
+            if last and isinstance(last.payload, dict) and last.payload.get("to"):
+                new_col = last.payload["to"]
+            elif cols:
+                new_col = cols[0].id
+            if new_col and any(c.id == new_col for c in cols):
+                card.column_id = new_col
+                # Si el nuevo estado no es la etapa final, la card deja de estar completada.
+                if cols and new_col != cols[-1].id:
+                    card.completed_at = None
+                card.updated_at = utc_now()
+
+    db.commit()
+    return {"success": True}
 
 
 # ============================================================

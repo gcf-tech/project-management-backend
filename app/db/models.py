@@ -607,6 +607,8 @@ class DeckCard(Base):
     # Subtarea de otra card (puede vivir en OTRO board y adoptar su flujo). Al
     # borrar el padre, las subtareas se desvinculan (SET NULL), no se borran.
     parent_card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="SET NULL"), nullable=True)
+    # Orden manual en la lista "En curso" (independiente de la posición por columna).
+    list_order = Column(Integer, nullable=True)
 
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)               # rich text / markdown
