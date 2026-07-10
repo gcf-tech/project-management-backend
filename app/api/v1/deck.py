@@ -17,6 +17,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
+import os
 from sqlalchemy import and_, func, case
 from typing import Annotated, List, Optional, Dict, Any
 from datetime import datetime, date, timedelta, timezone
@@ -37,6 +38,7 @@ from app.db.models import (
     DeckCardAssignee,
     DeckCardFollower,
     DeckCardTeam,
+    DeckCardFavorite,
     DeckTag,
     DeckCardTag,
     DeckComment,
@@ -326,6 +328,18 @@ def _within_edit_window(created_at: Optional[datetime]) -> bool:
     aware = _as_utc(created_at)
     return aware is not None and (utc_now() - aware) <= EDIT_WINDOW
 
+# Ventana para el indicador "actualizada recientemente" (punto gris en la tarea).
+RECENT_WINDOW = timedelta(hours=48)
+
+# DEV: si está activo, NO se excluye al actor de sus propias notificaciones, así
+# tus propios cambios encienden el punto naranja (útil para previsualizar en
+# pruebas). Activar con DECK_DEV_SELF_NOTIFY=true en el entorno. NO usar en prod.
+DEV_SELF_NOTIFY = os.getenv("DECK_DEV_SELF_NOTIFY", "").strip().lower() in ("1", "true", "yes", "on")
+
+def _is_recent(updated_at: Optional[datetime]) -> bool:
+    aware = _as_utc(updated_at)
+    return aware is not None and (utc_now() - aware) <= RECENT_WINDOW
+
 
 # ============================================================
 # SERIALIZATION
@@ -396,6 +410,8 @@ def _serialize_card(card: DeckCard, *, full=False, sub=None) -> Dict[str, Any]:
         "tags": [_serialize_tag(ct.tag) for ct in card.tags if ct.tag],
         "createdAt": card.created_at.isoformat() if card.created_at else None,
         "updatedAt": card.updated_at.isoformat() if card.updated_at else None,
+        # Actividad reciente (indicador gris a nivel de tarea).
+        "recentlyUpdated": _is_recent(card.updated_at),
     }
     if full:
         out["followers"] = [_user_brief(f.user) for f in card.followers if f.user]
@@ -411,6 +427,23 @@ def _serialize_card(card: DeckCard, *, full=False, sub=None) -> Dict[str, Any]:
         out["subtaskCount"] = sub.get("count", 0)
         out["subtaskDone"] = sub.get("done", 0)
     return out
+
+
+def _augment_user_flags(db: Session, user: User, dicts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Marca por-usuario cada card serializada: `isFavorite` y `hasUnread`
+    (tiene notificaciones sin leer → algo cambió recientemente en la tarea)."""
+    ids = [d["id"] for d in dicts]
+    if not ids:
+        return dicts
+    favs = {r[0] for r in db.query(DeckCardFavorite.card_id).filter(
+        and_(DeckCardFavorite.user_id == user.id, DeckCardFavorite.card_id.in_(ids))).all()}
+    unread = {r[0] for r in db.query(DeckNotification.card_id).filter(
+        and_(DeckNotification.user_id == user.id, DeckNotification.is_read.is_(False),
+             DeckNotification.card_id.in_(ids))).all()}
+    for d in dicts:
+        d["isFavorite"] = d["id"] in favs
+        d["hasUnread"] = d["id"] in unread
+    return dicts
 
 
 def _subtask_rollup(db: Session, card_ids: List[int]) -> Dict[int, Dict[str, int]]:
@@ -521,7 +554,10 @@ def _log_activity(db: Session, card: DeckCard, actor: Optional[User], event_type
     if extra_recipients:
         recipients |= set(extra_recipients)
     if actor:
-        recipients.discard(actor.id)
+        if DEV_SELF_NOTIFY:
+            recipients.add(actor.id)      # dev: notifícate a ti mismo para previsualizar
+        else:
+            recipients.discard(actor.id)
 
     for uid in recipients:
         db.add(DeckNotification(
@@ -866,7 +902,9 @@ async def list_cards(
     _require_see_board(ctx, board)
     cards = _load_board_cards(db, ctx, board)
     roll = _subtask_rollup(db, [c.id for c in cards])
-    return {"cards": [_serialize_card(c, sub=roll.get(c.id)) for c in cards]}
+    dicts = [_serialize_card(c, sub=roll.get(c.id)) for c in cards]
+    _augment_user_flags(db, user, dicts)
+    return {"cards": dicts}
 
 
 @router.post("/boards/{board_id}/list-order")
@@ -902,7 +940,63 @@ async def get_card(
     card = _get_card_or_404(db, card_id)
     _require_see_card_or_parent(db, ctx, card)
     roll = _subtask_rollup(db, [card.id]).get(card.id)
-    return _serialize_card(card, full=True, sub=roll)
+    out = _serialize_card(card, full=True, sub=roll)
+    # Abrir la card cuenta como "visto": marca sus notificaciones como leídas
+    # (limpia el indicador de la tarea y baja el contador de la campana).
+    db.query(DeckNotification).filter(and_(
+        DeckNotification.user_id == user.id,
+        DeckNotification.card_id == card.id,
+        DeckNotification.is_read.is_(False),
+    )).update({DeckNotification.is_read: True, DeckNotification.read_at: utc_now()}, synchronize_session=False)
+    db.commit()
+    out["isFavorite"] = db.query(DeckCardFavorite).filter_by(user_id=user.id, card_id=card.id).first() is not None
+    out["hasUnread"] = False
+    return out
+
+
+@router.post("/cards/{card_id}/favorite")
+async def add_favorite(
+    card_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    card = _get_card_or_404(db, card_id)
+    _require_see_card_or_parent(db, ctx, card)
+    if not db.query(DeckCardFavorite).filter_by(user_id=user.id, card_id=card.id).first():
+        db.add(DeckCardFavorite(user_id=user.id, card_id=card.id, created_at=utc_now()))
+        db.commit()
+    return {"success": True, "isFavorite": True}
+
+
+@router.delete("/cards/{card_id}/favorite")
+async def remove_favorite(
+    card_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    db.query(DeckCardFavorite).filter_by(user_id=user.id, card_id=card_id).delete()
+    db.commit()
+    return {"success": True, "isFavorite": False}
+
+
+@router.get("/notifications/unread-cards")
+async def unread_cards(
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Ids de las cards con notificaciones SIN LEER para el usuario actual.
+    Se sondea desde la lista para mantener vivo el indicador naranja de novedad
+    sin recargar todo el tablero."""
+    user = await _get_current_user(authorization, db)
+    rows = db.query(DeckNotification.card_id).filter(and_(
+        DeckNotification.user_id == user.id,
+        DeckNotification.is_read.is_(False),
+        DeckNotification.card_id.isnot(None),
+    )).distinct().all()
+    return {"cardIds": [r[0] for r in rows]}
 
 
 # ============================================================
@@ -2088,7 +2182,9 @@ async def board_shared_cards(
             DeckCard.archived.is_(False),
         )
     ).order_by(DeckCard.updated_at.desc()).all()
-    return {"cards": [_serialize_card(c, full=True) for c in cards]}
+    dicts = [_serialize_card(c, full=True) for c in cards]
+    _augment_user_flags(db, user, dicts)
+    return {"cards": dicts}
 
 
 @router.post("/cards/{card_id}/share")

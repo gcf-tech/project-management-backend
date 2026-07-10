@@ -704,6 +704,22 @@ class DeckCardTeam(Base):
     )
 
 
+class DeckCardFavorite(Base):
+    """M2M card↔user: tareas marcadas como favoritas por cada usuario."""
+    __tablename__ = "deck_card_favorites"
+
+    card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    card = relationship("DeckCard")
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("idx_deck_fav_user", "user_id"),
+    )
+
+
 class DeckTag(Base):
     """Reusable label/tag, scoped to a board."""
     __tablename__ = "deck_tags"
