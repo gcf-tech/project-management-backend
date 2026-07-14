@@ -47,6 +47,11 @@ class User(Base):
     #   "member" → sees own team boards + cards shared with their team
     #   NULL     → falls back to users.role ('admin' ⇒ all boards, else member scope)
     deck_role = Column(String(20), nullable=True)
+    # Workspace (oficina virtual) manager flag. Campo MANUAL (como role_commercial/
+    # assessment_role/deck_role) — NO se sincroniza desde Nextcloud. Se siembra desde
+    # el `perfiles.es_gerente` de Supabase durante la migración (match por email), o se
+    # pone a mano. Gatea el dashboard de "Equipo" + la gestión de puestos.
+    workspace_manager = Column(Boolean, default=False, nullable=False, server_default="0")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=utc_now)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
@@ -892,4 +897,145 @@ class DeckStageNote(Base):
 
     __table_args__ = (
         Index("idx_deck_stage_notes_card", "card_id", "column_id"),
+    )
+
+
+# ============================================================
+# WORKSPACE (Oficina virtual "Habbo") MODELS
+# ============================================================
+# Migrados desde Supabase. nombre/email vienen de users.display_name/users.email y
+# cargo de users.job_title; estas tablas guardan SOLO lo que no vive en `users`.
+
+
+class WorkspaceProfile(Base):
+    """Supabase `perfiles`: campos de perfil propios del workspace. 1:1 con users
+    (user_id es PK, estilo UserPreferences)."""
+    __tablename__ = "workspace_profiles"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    empresa = Column(String(150), nullable=True)
+    departamento = Column(String(100), nullable=True)
+    avatar = Column(JSON, nullable=True)                       # perfiles.avatar (json)
+    ultima_actividad = Column(String(255), nullable=True)      # última actividad reportada (texto)
+    ultima_actividad_en = Column(DateTime(timezone=True), nullable=True)
+    proyecto = Column(String(255), nullable=True)              # guardarDatosTrabajo
+    rendimiento = Column(Integer, nullable=True)               # 0-100
+    estado = Column(String(50), nullable=True)                 # "activo" / "ausente" / ...
+    onboarded = Column(Boolean, default=False, nullable=False, server_default="0")
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    user = relationship("User")
+
+
+class WorkspaceSession(Base):
+    """Supabase `sesiones`: ventanas de presencia. Los minutos NO salen de aquí
+    (se acumulan por heartbeat en WorkspaceDailyTime)."""
+    __tablename__ = "workspace_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    inicio = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    fin = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("idx_workspace_sessions_user", "user_id", "inicio"),
+        Index("idx_workspace_sessions_user_open", "user_id", "fin"),
+    )
+
+
+class WorkspaceDailyTime(Base):
+    """Supabase `tiempo_diario` + RPC sumar_minutos. Una fila por (user, fecha)."""
+    __tablename__ = "workspace_daily_time"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    fecha = Column(Date, nullable=False)
+    minutos = Column(Integer, default=0, nullable=False, server_default="0")
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("uq_workspace_daily_user_fecha", "user_id", "fecha", unique=True),
+        Index("idx_workspace_daily_fecha", "fecha"),
+    )
+
+
+class WorkspaceActivity(Base):
+    """Supabase `actividades`: feed de actividad (texto libre)."""
+    __tablename__ = "workspace_activities"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    actividad = Column(String(500), nullable=False)
+    momento = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("idx_workspace_activities_user_momento", "user_id", "momento"),
+    )
+
+
+class WorkspaceTask(Base):
+    """Supabase `tareas`: checklist diaria ligera (distinta de la tabla `tasks`)."""
+    __tablename__ = "workspace_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    texto = Column(String(500), nullable=False)
+    completada = Column(Boolean, default=False, nullable=False, server_default="0")
+    fecha = Column(Date, nullable=False)
+    creado_en = Column(DateTime(timezone=True), default=utc_now)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("idx_workspace_tasks_user_fecha", "user_id", "fecha"),
+    )
+
+
+class WorkspaceMessage(Base):
+    """Supabase `mensajes`: chat 1:1. PERSISTENCIA + HISTORIAL solamente — la entrega
+    en vivo la hace el WebSocket propio del workspace (Node/Express)."""
+    __tablename__ = "workspace_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    de_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    para_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    texto = Column(Text, nullable=False)
+    creado_en = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    remitente = relationship("User", foreign_keys=[de_id])
+    destinatario = relationship("User", foreign_keys=[para_id])
+
+    __table_args__ = (
+        Index("idx_workspace_msg_pair", "de_id", "para_id", "creado_en"),
+        Index("idx_workspace_msg_para", "para_id", "de_id", "creado_en"),
+    )
+
+
+class WorkspaceWorkstation(Base):
+    """Supabase `puestos`: escritorios del plano de oficina, por departamento."""
+    __tablename__ = "workspace_workstations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    dept_id = Column(String(100), nullable=False)
+    x = Column(Integer, nullable=False, default=0)
+    y = Column(Integer, nullable=False, default=0)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    etiqueta = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    ocupante = relationship("User", foreign_keys=[usuario_id])
+
+    __table_args__ = (
+        Index("idx_workspace_puestos_dept", "dept_id"),
+        Index("idx_workspace_puestos_user", "usuario_id"),
     )
