@@ -709,6 +709,16 @@ class DeckCardTeam(Base):
     )
 
 
+class DeckSetting(Base):
+    """Almacén genérico de configuración a nivel admin (clave → JSON). Evita
+    tener que tocar código para cambiar comportamientos (p.ej. el reporte)."""
+    __tablename__ = "deck_settings"
+
+    key = Column(String(80), primary_key=True)
+    value = Column(JSON, nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
 class DeckCardFavorite(Base):
     """M2M card↔user: tareas marcadas como favoritas por cada usuario."""
     __tablename__ = "deck_card_favorites"

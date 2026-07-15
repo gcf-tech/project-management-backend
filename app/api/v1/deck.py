@@ -18,6 +18,9 @@ from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File,
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 import os
+import csv
+import io
+import re
 from sqlalchemy import and_, func, case
 from typing import Annotated, List, Optional, Dict, Any
 from datetime import datetime, date, timedelta, timezone
@@ -27,6 +30,7 @@ from app.api.dependencies import get_db
 from app.core.security import get_nc_user_info
 from app.services.nextcloud_svc import push_nc_notification
 from app.services.email_svc import send_email, build_notification_email
+from app.core import config
 from app.core.datetime_utils import utc_now
 from app.db.models import (
     User,
@@ -39,6 +43,7 @@ from app.db.models import (
     DeckCardFollower,
     DeckCardTeam,
     DeckCardFavorite,
+    DeckSetting,
     DeckTag,
     DeckCardTag,
     DeckComment,
@@ -200,12 +205,28 @@ class DeckContext:
     """Resolved Deck access context for the current user."""
     def __init__(self, user: User, role: str, team_ids: set, visible_board_ids):
         self.user = user
-        self.role = role                       # "admin" | "member"
+        self.role = role                       # "admin" | "leader" | "member"
         self.team_ids = team_ids               # set[int] — user's team(s)
         self.visible_board_ids = visible_board_ids  # set[int] or None (= all)
 
     def is_admin(self) -> bool:
         return self.role == "admin"
+
+    def is_leader(self) -> bool:
+        return self.role == "leader"
+
+    def can_see_analytics(self) -> bool:
+        """Admin y leader ven el dashboard de analítica; el miembro no."""
+        return self.role in ("admin", "leader")
+
+    def analytics_team_ids(self, db: Session):
+        """Equipos cuya analítica puede ver: admin → todos (None); leader → sus
+        equipos; miembro → ninguno."""
+        if self.role == "admin":
+            return None  # todos
+        if self.role == "leader":
+            return set(self.team_ids)
+        return set()
 
     def can_see_board(self, board_id: int) -> bool:
         return self.visible_board_ids is None or board_id in self.visible_board_ids
@@ -229,6 +250,8 @@ def _build_deck_context(db: Session, user: User) -> DeckContext:
     role = user.deck_role
     if not role:
         role = "admin" if user.role == "admin" else "member"
+    if role not in ("admin", "leader", "member"):
+        role = "member"
 
     # users.team_id is the single Nextcloud-synced team. Modeled as a set to
     # stay future-proof for multi-team membership.
@@ -246,7 +269,9 @@ def _build_deck_context(db: Session, user: User) -> DeckContext:
             .join(DeckCardTeam, DeckCardTeam.card_id == DeckCard.id)
             .filter(DeckCardTeam.team_id.in_(team_ids)).distinct().all()
         }
-    return DeckContext(user, "member", team_ids, own | shared)
+    # leader y member comparten visibilidad de tableros (propios + compartidos);
+    # el leader solo se distingue por el acceso a la analítica de su equipo.
+    return DeckContext(user, role, team_ids, own | shared)
 
 
 def _get_board_or_404(db: Session, board_id: int) -> DeckBoard:
@@ -639,6 +664,8 @@ async def bootstrap(
             "displayName": user.display_name,
             "deckRole": ctx.role,
             "isAdmin": ctx.is_admin(),
+            "isLeader": ctx.is_leader(),
+            "canSeeAnalytics": ctx.can_see_analytics(),
             "teamIds": list(ctx.team_ids),
         },
         "boards": [_serialize_board(b) for b in boards],
@@ -951,6 +978,7 @@ async def get_card(
     db.commit()
     out["isFavorite"] = db.query(DeckCardFavorite).filter_by(user_id=user.id, card_id=card.id).first() is not None
     out["hasUnread"] = False
+    out["can"] = _card_capabilities(db, ctx, card)
     return out
 
 
@@ -1188,21 +1216,33 @@ async def patch_card(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_write_card(ctx, card)
+    _require_see_card_or_parent(db, ctx, card)
+    perms = _permissions(db)
 
+    def _gate(action):
+        if not _can_do(perms, action, ctx, card):
+            raise HTTPException(status_code=403, detail="No tienes permiso para este cambio")
+
+    if body.title is not None or body.description is not None:
+        _gate("editText")
     if body.title is not None:
         card.title = body.title
     if body.description is not None:
         card.description = body.description
     if body.projectId is not None:
+        _gate("editText")
         card.project_id = body.projectId
     if body.priority is not None:
+        _gate("priority")
         card.priority = body.priority
     if body.prototypeUrl is not None:
+        _gate("editText")
         card.prototype_url = body.prototypeUrl or None
     if body.startDate is not None:
+        _gate("dates")
         card.start_date = _parse_dt(body.startDate)
     if body.dueDate is not None:
+        _gate("dueDate")
         old_due = card.due_date
         card.due_date = _parse_dt(body.dueDate)
         if old_due != card.due_date:
@@ -1226,7 +1266,7 @@ async def move_card(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_write_card(ctx, card)
+    _require_perm(db, ctx, card, "move")
 
     target_col = db.query(DeckColumn).filter(DeckColumn.id == body.columnId).first()
     if not target_col or target_col.board_id != card.board_id:
@@ -1262,7 +1302,7 @@ async def complete_card(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_write_card(ctx, card)
+    _require_perm(db, ctx, card, "complete")
     card.completed_at = utc_now()
     card.updated_at = utc_now()
     _log_activity(db, card, user, "completed", message=f"{user.display_name} completed this card")
@@ -1292,7 +1332,7 @@ async def reopen_card(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_write_card(ctx, card)
+    _require_perm(db, ctx, card, "complete")
     card.completed_at = None
     card.updated_at = utc_now()
     _log_activity(db, card, user, "reopened", message=f"{user.display_name} reopened this card", notify=False)
@@ -1310,7 +1350,7 @@ async def archive_card(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_write_card(ctx, card)
+    _require_perm(db, ctx, card, "delete")
     card.archived = True
     card.updated_at = utc_now()
     _log_activity(db, card, user, "archived", message=f"{user.display_name} archived this card", notify=False)
@@ -1327,7 +1367,7 @@ async def restore_card(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_write_card(ctx, card)
+    _require_perm(db, ctx, card, "delete")
     card.archived = False
     card.updated_at = utc_now()
     _log_activity(db, card, user, "restored", message=f"{user.display_name} restored this card", notify=False)
@@ -1345,7 +1385,7 @@ async def delete_card(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_owner_team(ctx, card.owner_team_id)
+    _require_perm(db, ctx, card, "delete")
     db.delete(card)
     db.commit()
     return {"success": True}
@@ -1365,7 +1405,7 @@ async def add_assignee(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_write_card(ctx, card)
+    _require_perm(db, ctx, card, "assignees")
 
     target = db.query(User).filter(User.id == body.userId).first()
     if not target:
@@ -1405,7 +1445,7 @@ async def remove_assignee(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_write_card(ctx, card)
+    _require_perm(db, ctx, card, "assignees")
     row = db.query(DeckCardAssignee).filter(
         and_(DeckCardAssignee.card_id == card_id, DeckCardAssignee.user_id == user_id)
     ).first()
@@ -1471,7 +1511,7 @@ async def attach_tag(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_write_card(ctx, card)
+    _require_perm(db, ctx, card, "tags")
 
     tag = None
     if body.tagId:
@@ -1513,7 +1553,7 @@ async def detach_tag(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_write_card(ctx, card)
+    _require_perm(db, ctx, card, "tags")
     row = db.query(DeckCardTag).filter(
         and_(DeckCardTag.card_id == card_id, DeckCardTag.tag_id == tag_id)
     ).first()
@@ -1927,9 +1967,9 @@ async def add_follower(
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
     _require_see_card(ctx, card)
-    # A user can add themselves; adding others requires write access.
+    # Uno puede seguirse a sí mismo; gestionar a otros requiere permiso.
     if body.userId != user.id:
-        _require_write_card(ctx, card)
+        _require_perm(db, ctx, card, "followers")
     exists = db.query(DeckCardFollower).filter(
         and_(DeckCardFollower.card_id == card_id, DeckCardFollower.user_id == body.userId)
     ).first()
@@ -1952,7 +1992,7 @@ async def remove_follower(
     card = _get_card_or_404(db, card_id)
     _require_see_card(ctx, card)
     if user_id != user.id:
-        _require_write_card(ctx, card)
+        _require_perm(db, ctx, card, "followers")
     row = db.query(DeckCardFollower).filter(
         and_(DeckCardFollower.card_id == card_id, DeckCardFollower.user_id == user_id)
     ).first()
@@ -2198,7 +2238,7 @@ async def share_card(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_owner_team(ctx, card.owner_team_id)
+    _require_perm(db, ctx, card, "share")
 
     team = db.query(Team).filter(Team.id == body.teamId).first()
     if not team:
@@ -2242,7 +2282,7 @@ async def unshare_card(
     user = await _get_current_user(authorization, db)
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
-    _require_owner_team(ctx, card.owner_team_id)
+    _require_perm(db, ctx, card, "share")
 
     row = db.query(DeckCardTeam).filter(
         and_(DeckCardTeam.card_id == card_id, DeckCardTeam.team_id == team_id)
@@ -2258,3 +2298,910 @@ async def unshare_card(
     db.commit()
     db.refresh(card)
     return _serialize_card(card, full=True)
+
+
+# ============================================================
+# ADMIN — gestión de usuarios y equipos (solo admin)
+# ============================================================
+
+DECK_ROLES = ("admin", "leader", "member")
+
+
+class AdminUserPatch(BaseModel):
+    deckRole: Optional[str] = None     # "admin" | "leader" | "member" | "" (reset)
+    teamId: Optional[int] = None
+    clearTeam: bool = False            # poner team_id a NULL explícitamente
+
+
+class TeamCreate(BaseModel):
+    name: str
+
+
+def _require_admin(ctx: DeckContext):
+    if not ctx.is_admin():
+        raise HTTPException(status_code=403, detail="Solo administradores")
+
+
+def _team_name_map(db: Session) -> Dict[int, str]:
+    return {t.id: t.name for t in db.query(Team).all()}
+
+
+@router.get("/admin/users")
+async def admin_list_users(
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    names = _team_name_map(db)
+    users = db.query(User).filter(User.is_active.is_(True)).order_by(User.display_name).all()
+    out = []
+    for u in users:
+        # rol efectivo (mismo cálculo que _build_deck_context, para mostrarlo)
+        eff = u.deck_role or ("admin" if u.role == "admin" else "member")
+        if eff not in DECK_ROLES:
+            eff = "member"
+        out.append({
+            "userId": u.id, "ncUserId": u.nc_user_id, "displayName": u.display_name,
+            "email": u.email, "teamId": u.team_id, "teamName": names.get(u.team_id),
+            "deckRole": u.deck_role, "effectiveRole": eff,
+        })
+    return {"users": out}
+
+
+@router.patch("/admin/users/{user_id}")
+async def admin_patch_user(
+    user_id: int,
+    body: AdminUserPatch,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    if body.deckRole is not None:
+        role = body.deckRole.strip().lower()
+        if role == "":
+            target.deck_role = None            # volver al rol derivado
+        elif role in DECK_ROLES:
+            target.deck_role = role
+        else:
+            raise HTTPException(status_code=400, detail="Rol inválido")
+
+    if body.clearTeam:
+        target.team_id = None
+    elif body.teamId is not None:
+        if not db.query(Team).filter(Team.id == body.teamId).first():
+            raise HTTPException(status_code=404, detail="Equipo no encontrado")
+        target.team_id = body.teamId
+
+    db.commit()
+    db.refresh(target)
+    names = _team_name_map(db)
+    eff = target.deck_role or ("admin" if target.role == "admin" else "member")
+    if eff not in DECK_ROLES:
+        eff = "member"
+    return {
+        "userId": target.id, "displayName": target.display_name, "teamId": target.team_id,
+        "teamName": names.get(target.team_id), "deckRole": target.deck_role, "effectiveRole": eff,
+    }
+
+
+@router.get("/admin/teams")
+async def admin_list_teams(
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Equipos con conteo de miembros y si ya tienen tablero (para gestión admin)."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    member_counts = dict(
+        db.query(User.team_id, func.count(User.id)).filter(User.is_active.is_(True))
+        .group_by(User.team_id).all()
+    )
+    board_teams = {row[0] for row in db.query(DeckBoard.team_id).filter(DeckBoard.archived.is_(False)).all()}
+    teams = db.query(Team).order_by(Team.name).all()
+    return {"teams": [{
+        "id": t.id, "name": t.name,
+        "memberCount": int(member_counts.get(t.id, 0)),
+        "hasBoard": t.id in board_teams,
+    } for t in teams]}
+
+
+@router.post("/admin/teams")
+async def admin_create_team(
+    body: TeamCreate,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nombre requerido")
+    if db.query(Team).filter(Team.name == name).first():
+        raise HTTPException(status_code=409, detail="Ya existe un equipo con ese nombre")
+    team = Team(name=name)
+    db.add(team)
+    db.commit()
+    db.refresh(team)
+    return {"id": team.id, "name": team.name, "memberCount": 0, "hasBoard": False}
+
+
+# ── Importación de tarjetas por CSV (migración) ──────────────────────────────
+
+IMPORT_COLUMNS = ["titulo", "descripcion", "prioridad", "etapa",
+                  "fecha_inicio", "fecha_vencimiento", "asignados", "etiquetas", "completada"]
+_PRIO_MAP = {"baja": "low", "media": "medium", "alta": "high", "urgente": "urgent",
+             "low": "low", "medium": "medium", "high": "high", "urgent": "urgent"}
+_TAG_PALETTE = ["#F37022", "#1d2129", "#1f7a44", "#e0a11f", "#d64545", "#5a6473"]
+
+
+def _safe_dt(v):
+    try:
+        return _parse_dt(v)
+    except (ValueError, TypeError):
+        return None
+
+
+@router.post("/admin/boards/{board_id}/import")
+async def admin_import_cards(
+    board_id: int,
+    authorization: Annotated[str, Header()],
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Importa tarjetas desde un CSV al tablero indicado. Columnas admitidas:
+    titulo (obligatorio), descripcion, prioridad, etapa, fecha_inicio,
+    fecha_vencimiento, asignados (correos/usuarios separados por ; o ,),
+    etiquetas (separadas por ; o ,), completada (si/no)."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    board = _get_board_or_404(db, board_id)
+
+    cols = db.query(DeckColumn).filter(DeckColumn.board_id == board_id).order_by(DeckColumn.position).all()
+    if not cols:
+        raise HTTPException(status_code=400, detail="El tablero no tiene etapas")
+    col_by_name = {c.title.strip().lower(): c for c in cols}
+    first_col = cols[0]
+
+    users = db.query(User).filter(User.is_active.is_(True)).all()
+    by_email = {u.email.strip().lower(): u for u in users if u.email}
+    by_nc = {u.nc_user_id.strip().lower(): u for u in users if u.nc_user_id}
+    by_name = {u.display_name.strip().lower(): u for u in users if u.display_name}
+    tags = {t.name.strip().lower(): t for t in db.query(DeckTag).filter(DeckTag.board_id == board_id).all()}
+
+    raw = await file.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Archivo muy grande (máx 5 MB)")
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV vacío o sin encabezados")
+
+    created, skipped, errors = 0, 0, []
+    for i, row in enumerate(reader, start=2):  # fila 1 = encabezado
+        # Normaliza claves; ignora columnas extra (DictReader las mete en key None
+        # como lista) para que un CSV mal formado no rompa la importación.
+        r = {}
+        for k, v in row.items():
+            if k is None:
+                continue
+            r[k.strip().lower()] = (v if isinstance(v, str) else "").strip()
+        title = r.get("titulo") or r.get("title") or ""
+        if not title:
+            skipped += 1
+            if len(errors) < 50:
+                errors.append({"row": i, "reason": "sin título"})
+            continue
+
+        col = col_by_name.get((r.get("etapa") or r.get("stage") or "").strip().lower(), first_col)
+        card = DeckCard(
+            board_id=board_id, column_id=col.id, owner_team_id=board.team_id,
+            title=title[:255], description=(r.get("descripcion") or r.get("description") or None),
+            priority=_PRIO_MAP.get((r.get("prioridad") or r.get("priority") or "").lower()),
+            start_date=_safe_dt(r.get("fecha_inicio") or r.get("start_date")),
+            due_date=_safe_dt(r.get("fecha_vencimiento") or r.get("due_date")),
+            position=_next_position(db, DeckCard, column_id=col.id),
+            created_by=user.id, created_at=utc_now(), updated_at=utc_now(),
+        )
+        if (r.get("completada") or r.get("completed") or "").lower() in ("si", "sí", "yes", "true", "1", "x"):
+            card.completed_at = utc_now()
+        db.add(card)
+        db.flush()
+
+        db.add(DeckCardTeam(card_id=card.id, team_id=board.team_id, is_owner=True, shared_by=user.id, created_at=utc_now()))
+        follower_ids = {user.id}
+        for token in re.split(r"[;,]", r.get("asignados") or r.get("assignees") or ""):
+            t = token.strip().lower()
+            if not t:
+                continue
+            u = by_email.get(t) or by_nc.get(t) or by_name.get(t)
+            if u:
+                db.add(DeckCardAssignee(card_id=card.id, user_id=u.id, assigned_by=user.id, created_at=utc_now()))
+                follower_ids.add(u.id)
+        for uid in follower_ids:
+            db.add(DeckCardFollower(card_id=card.id, user_id=uid, created_at=utc_now()))
+        for token in re.split(r"[;,]", r.get("etiquetas") or r.get("tags") or ""):
+            name = token.strip()
+            if not name:
+                continue
+            tag = tags.get(name.lower())
+            if not tag:
+                tag = DeckTag(board_id=board_id, name=name[:60], color=_TAG_PALETTE[len(tags) % len(_TAG_PALETTE)], created_at=utc_now())
+                db.add(tag)
+                db.flush()
+                tags[name.lower()] = tag
+            db.add(DeckCardTag(card_id=card.id, tag_id=tag.id, created_at=utc_now()))
+
+        _log_activity(db, card, user, "created", message=f"{user.display_name} importó esta tarjeta", notify=False)
+        created += 1
+
+    db.commit()
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+# ============================================================
+# ANALYTICS — métricas derivadas del flujo (admin: todos; leader: su equipo)
+# ============================================================
+
+def _stage_durations(db: Session, cards: List[DeckCard]):
+    """Tiempo acumulado por columna reproduciendo la actividad (created + moved),
+    igual que el diagrama del drawer pero del lado servidor. Devuelve
+    (ms_por_columna, n_intervalos_por_columna)."""
+    ids = [c.id for c in cards]
+    if not ids:
+        return {}, {}
+    acts = db.query(DeckActivity).filter(
+        and_(DeckActivity.card_id.in_(ids), DeckActivity.event_type.in_(("created", "moved")))
+    ).order_by(DeckActivity.card_id, DeckActivity.created_at).all()
+    by_card: Dict[int, List[DeckActivity]] = {}
+    for a in acts:
+        by_card.setdefault(a.card_id, []).append(a)
+
+    now = utc_now()
+    stage_ms: Dict[int, float] = {}
+    stage_n: Dict[int, int] = {}
+    for card in cards:
+        acts_c = by_card.get(card.id, [])
+        moves = [a for a in acts_c if a.event_type == "moved" and a.payload and a.payload.get("to") is not None]
+        # etapa inicial real (no siempre Creación)
+        if moves and moves[0].payload.get("from") is not None:
+            start = moves[0].payload["from"]
+        elif moves:
+            start = None
+        else:
+            start = card.column_id
+        seq = []
+        created = next((a for a in acts_c if a.event_type == "created"), None)
+        if created and start is not None:
+            seq.append((start, created.created_at))
+        for m in moves:
+            seq.append((m.payload["to"], m.created_at))
+        for i, (stage, at) in enumerate(seq):
+            end = seq[i + 1][1] if i + 1 < len(seq) else now
+            dur = (_as_utc(end) - _as_utc(at)).total_seconds() * 1000
+            if dur > 0 and stage is not None:
+                stage_ms[stage] = stage_ms.get(stage, 0) + dur
+                stage_n[stage] = stage_n.get(stage, 0) + 1
+    return stage_ms, stage_n
+
+
+@router.get("/analytics/overview")
+async def analytics_overview(
+    authorization: Annotated[str, Header()],
+    teamId: Optional[int] = None,
+    days: int = 30,
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    if not ctx.can_see_analytics():
+        raise HTTPException(status_code=403, detail="Sin acceso a la analítica")
+
+    days = max(1, min(days, 365))
+    since = utc_now() - timedelta(days=days)
+    now = utc_now()
+
+    teams_all = db.query(Team).order_by(Team.name).all()
+    name_by_team = {t.id: t.name for t in teams_all}
+    allowed = ctx.analytics_team_ids(db)  # None = admin (todos) | set = leader
+
+    if allowed is None:
+        scope_ids = [teamId] if teamId else [t.id for t in teams_all]
+        is_all = teamId is None
+    else:
+        if not allowed:
+            raise HTTPException(status_code=403, detail="Sin equipo asignado")
+        scope_ids = [teamId] if (teamId and teamId in allowed) else list(allowed)
+        is_all = teamId is None and len(scope_ids) > 1
+    scope_ids = [t for t in scope_ids if t is not None]
+
+    cards = db.query(DeckCard).filter(
+        and_(DeckCard.owner_team_id.in_(scope_ids or [0]), DeckCard.archived.is_(False))
+    ).all()
+
+    boards = db.query(DeckBoard).filter(DeckBoard.team_id.in_(scope_ids or [0])).all()
+    cols = db.query(DeckColumn).filter(DeckColumn.board_id.in_([b.id for b in boards] or [0])).all()
+    title_by_col = {c.id: c.title for c in cols}
+    # primera columna (backlog "Creación") de cada tablero
+    first_col_by_board: Dict[int, int] = {}
+    stage_meta: Dict[str, Dict[str, Any]] = {}  # title -> {position, color}
+    for c in sorted(cols, key=lambda x: x.position):
+        first_col_by_board.setdefault(c.board_id, c.id)
+        stage_meta.setdefault(c.title, {"position": c.position, "color": c.color})
+    backlog_ids = set(first_col_by_board.values())
+
+    # ── Totales de estado ──
+    total = len(cards)
+    backlog = inprogress = completed = overdue = completed_range = created_range = 0
+    for c in cards:
+        if c.completed_at:
+            completed += 1
+            if _as_utc(c.completed_at) >= since:
+                completed_range += 1
+        elif c.column_id in backlog_ids:
+            backlog += 1
+        else:
+            inprogress += 1
+        if not c.completed_at and c.due_date and _as_utc(c.due_date) < now:
+            overdue += 1
+        if c.created_at and _as_utc(c.created_at) >= since:
+            created_range += 1
+
+    # ── Distribución por etapa (tareas abiertas) ──
+    stage_count: Dict[str, int] = {}
+    for c in cards:
+        if c.completed_at:
+            continue
+        t = title_by_col.get(c.column_id, "—")
+        stage_count[t] = stage_count.get(t, 0) + 1
+    by_stage = [{
+        "title": t, "count": n,
+        "color": stage_meta.get(t, {}).get("color"),
+        "position": stage_meta.get(t, {}).get("position", 99),
+    } for t, n in stage_count.items()]
+    by_stage.sort(key=lambda x: x["position"])
+
+    # ── Throughput (completadas por día en el rango) ──
+    tput: Dict[str, int] = {}
+    cycle_durs = []
+    for c in cards:
+        if c.completed_at and _as_utc(c.completed_at) >= since:
+            d = _as_utc(c.completed_at).date().isoformat()
+            tput[d] = tput.get(d, 0) + 1
+            if c.created_at:
+                cycle_durs.append((_as_utc(c.completed_at) - _as_utc(c.created_at)).total_seconds() / 86400)
+    throughput = [{"date": d, "count": n} for d, n in sorted(tput.items())]
+    cycle = {"avgDays": round(sum(cycle_durs) / len(cycle_durs), 1) if cycle_durs else None, "count": len(cycle_durs)}
+
+    # ── Cuello de botella (tiempo promedio por etapa) ──
+    stage_ms, stage_n = _stage_durations(db, cards)
+    bt: Dict[str, List[float]] = {}
+    for cid, ms in stage_ms.items():
+        t = title_by_col.get(cid, "—")
+        e = bt.setdefault(t, [0.0, 0])
+        e[0] += ms
+        e[1] += stage_n.get(cid, 0)
+    bottleneck = [{
+        "title": t, "totalMs": ms, "n": n, "avgMs": (ms / n if n else 0),
+        "position": stage_meta.get(t, {}).get("position", 99),
+    } for t, (ms, n) in bt.items()]
+    bottleneck.sort(key=lambda x: x["avgMs"], reverse=True)
+
+    # ── Carga por usuario ──
+    card_by_id = {c.id: c for c in cards}
+    a_rows = db.query(DeckCardAssignee).filter(
+        DeckCardAssignee.card_id.in_(list(card_by_id.keys()) or [0])
+    ).all()
+    uids = {a.user_id for a in a_rows}
+    unames = {u.id: u.display_name for u in db.query(User).filter(User.id.in_(uids or [0])).all()}
+    user_stats: Dict[int, Dict[str, int]] = {}
+    for a in a_rows:
+        c = card_by_id.get(a.card_id)
+        if not c:
+            continue
+        s = user_stats.setdefault(a.user_id, {"open": 0, "completed": 0, "overdue": 0})
+        if c.completed_at:
+            s["completed"] += 1
+        else:
+            s["open"] += 1
+            if c.due_date and _as_utc(c.due_date) < now:
+                s["overdue"] += 1
+    by_user = [{"userId": uid, "displayName": unames.get(uid, f"Usuario {uid}"), **st} for uid, st in user_stats.items()]
+    by_user.sort(key=lambda x: (x["overdue"], x["open"]), reverse=True)
+
+    # ── Por prioridad (tareas abiertas) ──
+    prio_count = {"urgent": 0, "high": 0, "medium": 0, "low": 0, "none": 0}
+    for c in cards:
+        if c.completed_at:
+            continue
+        prio_count[c.priority or "none"] = prio_count.get(c.priority or "none", 0) + 1
+    by_priority = [{"key": k, "count": prio_count.get(k, 0)} for k in ("urgent", "high", "medium", "low", "none")]
+
+    # ── Por proyecto ──
+    proj_ids = {c.project_id for c in cards if c.project_id}
+    pnames = {p.id: p.name for p in db.query(DeckProject).filter(DeckProject.id.in_(proj_ids or [0])).all()}
+    proj: Dict[int, Dict[str, int]] = {}
+    for c in cards:
+        if not c.project_id:
+            continue
+        e = proj.setdefault(c.project_id, {"total": 0, "completed": 0})
+        e["total"] += 1
+        if c.completed_at:
+            e["completed"] += 1
+    by_project = [{"projectId": pid, "name": pnames.get(pid, "—"), **st} for pid, st in proj.items()]
+    by_project.sort(key=lambda x: x["total"], reverse=True)
+
+    # ── Resumen por equipo (vista admin de todos) ──
+    teams_summary = []
+    if is_all:
+        per = {tid: {"total": 0, "inProgress": 0, "completed": 0, "overdue": 0, "completedInRange": 0} for tid in scope_ids}
+        for c in cards:
+            e = per.get(c.owner_team_id)
+            if not e:
+                continue
+            e["total"] += 1
+            if c.completed_at:
+                e["completed"] += 1
+                if _as_utc(c.completed_at) >= since:
+                    e["completedInRange"] += 1
+            elif c.column_id not in backlog_ids:
+                e["inProgress"] += 1
+            if not c.completed_at and c.due_date and _as_utc(c.due_date) < now:
+                e["overdue"] += 1
+        teams_summary = [{"teamId": tid, "teamName": name_by_team.get(tid), **per[tid]} for tid in scope_ids]
+        teams_summary.sort(key=lambda x: x["total"], reverse=True)
+
+    return {
+        "scope": {
+            "teamIds": scope_ids,
+            "teamNames": [name_by_team.get(t) for t in scope_ids],
+            "isAll": is_all,
+            "days": days,
+        },
+        "totals": {
+            "total": total, "backlog": backlog, "inProgress": inprogress, "completed": completed,
+            "overdue": overdue, "completedInRange": completed_range, "createdInRange": created_range,
+        },
+        "byStage": by_stage,
+        "throughput": throughput,
+        "cycleTime": cycle,
+        "bottleneck": bottleneck,
+        "byUser": by_user,
+        "byPriority": by_priority,
+        "byProject": by_project,
+        "teams": teams_summary,
+    }
+
+
+# ============================================================
+# REPORTE SEMANAL — lunes 8am a leaders + admins
+# ============================================================
+
+def _effective_role(u: User) -> str:
+    r = u.deck_role or ("admin" if u.role == "admin" else "member")
+    return r if r in ("admin", "leader", "member") else "member"
+
+
+def _fmt_ms(ms: float) -> str:
+    if not ms:
+        return "—"
+    mins = ms / 60000
+    if mins < 60:
+        return f"{int(round(mins))}m"
+    hours = mins / 60
+    if hours < 24:
+        return f"{hours:.1f}h"
+    return f"{hours / 24:.1f}d"
+
+
+def _weekly_summaries(db: Session, team_ids: List[int], since, now) -> List[Dict[str, Any]]:
+    """Resumen de la semana por equipo (completadas/creadas/en curso/vencidas,
+    cycle time y cuello de botella), todo derivado del flujo."""
+    if not team_ids:
+        return []
+    name_by = {t.id: t.name for t in db.query(Team).filter(Team.id.in_(team_ids)).all()}
+    cards = db.query(DeckCard).filter(
+        and_(DeckCard.owner_team_id.in_(team_ids), DeckCard.archived.is_(False))
+    ).all()
+    boards = db.query(DeckBoard).filter(DeckBoard.team_id.in_(team_ids)).all()
+    cols = db.query(DeckColumn).filter(DeckColumn.board_id.in_([b.id for b in boards] or [0])).all()
+    title_by_col = {c.id: c.title for c in cols}
+    first_col: Dict[int, int] = {}
+    for c in sorted(cols, key=lambda x: x.position):
+        first_col.setdefault(c.board_id, c.id)
+    backlog_ids = set(first_col.values())
+
+    per = {tid: {"teamId": tid, "teamName": name_by.get(tid), "completed": 0, "created": 0,
+                 "inProgress": 0, "overdue": 0, "open": 0} for tid in team_ids}
+    cycles: Dict[int, List[float]] = {tid: [] for tid in team_ids}
+    open_by_team: Dict[int, List[DeckCard]] = {}
+    for c in cards:
+        e = per.get(c.owner_team_id)
+        if not e:
+            continue
+        if c.completed_at and _as_utc(c.completed_at) >= since:
+            e["completed"] += 1
+            if c.created_at:
+                cycles[c.owner_team_id].append((_as_utc(c.completed_at) - _as_utc(c.created_at)).total_seconds() / 86400)
+        if c.created_at and _as_utc(c.created_at) >= since:
+            e["created"] += 1
+        if not c.completed_at:
+            e["open"] += 1
+            open_by_team.setdefault(c.owner_team_id, []).append(c)
+            if c.column_id not in backlog_ids:
+                e["inProgress"] += 1
+            if c.due_date and _as_utc(c.due_date) < now:
+                e["overdue"] += 1
+
+    for tid in team_ids:
+        sms, sn = _stage_durations(db, open_by_team.get(tid, []))
+        bt: Dict[str, List[float]] = {}
+        for cid, ms in sms.items():
+            t = title_by_col.get(cid, "—")
+            ee = bt.setdefault(t, [0.0, 0])
+            ee[0] += ms
+            ee[1] += sn.get(cid, 0)
+        top = max(((t, ms / n) for t, (ms, n) in bt.items() if n), key=lambda x: x[1], default=None)
+        per[tid]["bottleneck"] = {"title": top[0], "avgMs": top[1]} if top else None
+        cyc = cycles[tid]
+        per[tid]["avgCycleDays"] = round(sum(cyc) / len(cyc), 1) if cyc else None
+
+    return [per[tid] for tid in team_ids]
+
+
+def _weekly_report_email(recipient_name: str, scope_label: str, summaries: List[Dict[str, Any]],
+                         period_label: str = "la última semana"):
+    """(html, text) del reporte, con estilo GCF."""
+    url = config.DECK_APP_URL
+    rows = ""
+    tot = {"completed": 0, "created": 0, "inProgress": 0, "overdue": 0}
+    for s in summaries:
+        for k in tot:
+            tot[k] += s.get(k, 0)
+        bott = s.get("bottleneck")
+        bott_txt = f'{bott["title"]} · {_fmt_ms(bott["avgMs"])}' if bott else "—"
+        cyc = f'{s["avgCycleDays"]}d' if s.get("avgCycleDays") is not None else "—"
+        overdue_cell = (f'<b style="color:#d64545;">{s["overdue"]}</b>' if s.get("overdue") else "0")
+        rows += f"""<tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-weight:600;">{s.get('teamName') or '—'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;text-align:center;color:#1f7a44;font-weight:700;">{s.get('completed',0)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;text-align:center;">{s.get('created',0)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;text-align:center;">{s.get('inProgress',0)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;text-align:center;">{overdue_cell}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;text-align:center;">{cyc}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;color:#5a6473;">{bott_txt}</td>
+    </tr>"""
+
+    html = f"""\
+<!doctype html><html><body style="margin:0;background:#f4f6fa;padding:24px;font-family:Inter,Arial,sans-serif;">
+  <div style="max-width:680px;margin:0 auto;background:#fff;border:1px solid #dde3ec;border-radius:14px;overflow:hidden;">
+    <div style="background:#1d2129;padding:16px 22px;color:#fff;font-weight:800;font-size:16px;">
+      <span style="color:#F37022;">Deck</span> · Reporte semanal
+    </div>
+    <div style="padding:22px;">
+      <p style="margin:0 0 4px;font-size:15px;color:#1c2430;">Hola {recipient_name or ''},</p>
+      <p style="margin:0 0 16px;font-size:14px;color:#5a6473;">Resumen de {period_label} · <b style="color:#1d2129;">{scope_label}</b></p>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;color:#1c2430;">
+        <thead><tr style="background:#f4f6fa;">
+          <th style="padding:8px 10px;text-align:left;">Equipo</th>
+          <th style="padding:8px 10px;">Compl.</th>
+          <th style="padding:8px 10px;">Nuevas</th>
+          <th style="padding:8px 10px;">En curso</th>
+          <th style="padding:8px 10px;">Vencidas</th>
+          <th style="padding:8px 10px;">Cycle</th>
+          <th style="padding:8px 10px;text-align:left;">Cuello de botella</th>
+        </tr></thead>
+        <tbody>{rows}</tbody>
+      </table>
+      <p style="margin:16px 0 0;font-size:13px;color:#5a6473;">
+        Totales: <b style="color:#1f7a44;">{tot['completed']}</b> completadas ·
+        {tot['created']} nuevas · {tot['inProgress']} en curso ·
+        <b style="color:#d64545;">{tot['overdue']}</b> vencidas.
+      </p>
+      <a href="{url}" style="display:inline-block;margin-top:18px;background:#F37022;color:#fff;text-decoration:none;font-weight:700;padding:10px 18px;border-radius:9px;font-size:14px;">Abrir el dashboard</a>
+    </div>
+    <div style="padding:14px 22px;border-top:1px solid #eef1f6;color:#8a93a3;font-size:12px;">
+      Reporte automático de los lunes · no respondas a este correo.
+    </div>
+  </div>
+</body></html>"""
+
+    lines = [f"Reporte · {scope_label} · {period_label}", ""]
+    for s in summaries:
+        lines.append(f"- {s.get('teamName') or '—'}: {s.get('completed',0)} compl., {s.get('created',0)} nuevas, "
+                     f"{s.get('inProgress',0)} en curso, {s.get('overdue',0)} vencidas.")
+    lines.append(f"\nAbrir el dashboard: {url}")
+    return html, "\n".join(lines)
+
+
+async def send_weekly_reports(db: Session, only_to: Optional[str] = None, dry: bool = False,
+                              range_days: int = 7, period_label: str = "la última semana") -> Dict[str, Any]:
+    """Genera y envía el reporte: a cada admin el resumen de TODOS los equipos; a
+    cada leader el de SU equipo. Best-effort por destinatario."""
+    now = utc_now()
+    since = now - timedelta(days=range_days)
+    all_team_ids = [t.id for t in db.query(Team).all()]
+    all_summaries = _weekly_summaries(db, all_team_ids, since, now)
+    by_team = {s["teamId"]: s for s in all_summaries}
+
+    users = db.query(User).filter(User.is_active.is_(True)).all()
+    results = []
+    sent = 0
+    for u in users:
+        if not u.email:
+            continue
+        role = _effective_role(u)
+        if role == "admin":
+            summaries, scope = all_summaries, "Todos los equipos"
+        elif role == "leader" and u.team_id and u.team_id in by_team:
+            summaries, scope = [by_team[u.team_id]], (by_team[u.team_id].get("teamName") or "Tu equipo")
+        else:
+            continue
+        if only_to and u.email != only_to:
+            continue
+        if dry:
+            results.append({"to": u.email, "role": role, "teams": len(summaries)})
+            continue
+        html, text = _weekly_report_email(u.display_name, scope, summaries, period_label)
+        ok = await send_email(u.email, f"Reporte de Deck · {period_label}", html, text)
+        sent += 1 if ok else 0
+        results.append({"to": u.email, "role": role, "sent": ok})
+    return {"sent": sent, "recipients": results, "dry": dry}
+
+
+# ── Configuración del reporte (admin, sin tocar código) ──────────────────────
+
+REPORT_DEFAULTS = {
+    "enabled": True,
+    "frequency": "weekly",   # weekly | biweekly | monthly
+    "dayOfWeek": 0,          # 0=Lun … 6=Dom (weekly/biweekly)
+    "dayOfMonth": 1,         # 1..28 (monthly)
+    "hour": 8,               # hora local del servidor
+    "rangeDays": None,       # None = auto según frecuencia
+}
+_FREQ_RANGE = {"weekly": 7, "biweekly": 14, "monthly": 30}
+_FREQ_GAP = {"weekly": 6, "biweekly": 13, "monthly": 27}   # días mínimos entre envíos
+_FREQ_LABEL = {"weekly": "la última semana", "biweekly": "las últimas 2 semanas", "monthly": "el último mes"}
+
+
+def _get_setting(db: Session, key: str, default=None):
+    row = db.query(DeckSetting).filter(DeckSetting.key == key).first()
+    return row.value if row and row.value is not None else default
+
+
+def _set_setting(db: Session, key: str, value):
+    row = db.query(DeckSetting).filter(DeckSetting.key == key).first()
+    if row:
+        row.value = value
+        row.updated_at = utc_now()
+    else:
+        db.add(DeckSetting(key=key, value=value, updated_at=utc_now()))
+    db.commit()
+
+
+def _report_config(db: Session) -> Dict[str, Any]:
+    cfg = dict(REPORT_DEFAULTS)
+    cfg["lastSentAt"] = None
+    stored = _get_setting(db, "report") or {}
+    for k, v in stored.items():
+        cfg[k] = v
+    return cfg
+
+
+def _report_range_days(cfg) -> int:
+    return int(cfg["rangeDays"]) if cfg.get("rangeDays") else _FREQ_RANGE.get(cfg.get("frequency", "weekly"), 7)
+
+
+def _report_due(cfg, now, last_sent):
+    if not cfg.get("enabled"):
+        return False, "deshabilitado"
+    freq = cfg.get("frequency", "weekly")
+    if freq in ("weekly", "biweekly"):
+        if now.weekday() != int(cfg.get("dayOfWeek", 0)):
+            return False, "no es el día configurado"
+    elif freq == "monthly":
+        if now.day != int(cfg.get("dayOfMonth", 1)):
+            return False, "no es el día configurado"
+    if now.hour < int(cfg.get("hour", 8)):
+        return False, "aún no es la hora configurada"
+    if last_sent and (now - last_sent).days < _FREQ_GAP.get(freq, 6):
+        return False, "ya se envió en este período"
+    return True, "ok"
+
+
+async def run_scheduled_report(db: Session, force: bool = False, dry: bool = False) -> Dict[str, Any]:
+    """Ejecuta el reporte SI corresponde según la config admin. Pensado para un
+    cron diario: el 'cuándo' vive en la config, no en el cron."""
+    cfg = _report_config(db)
+    now = datetime.now()  # hora local del servidor (igual que el cron)
+    last = None
+    if cfg.get("lastSentAt"):
+        try: last = datetime.fromisoformat(cfg["lastSentAt"])
+        except (ValueError, TypeError): last = None
+    if not force:
+        due, reason = _report_due(cfg, now, last)
+        if not due:
+            return {"skipped": True, "reason": reason, "config": cfg}
+    res = await send_weekly_reports(
+        db, dry=dry, range_days=_report_range_days(cfg),
+        period_label=_FREQ_LABEL.get(cfg.get("frequency"), "el período"),
+    )
+    if not dry:
+        cfg["lastSentAt"] = now.isoformat()
+        _set_setting(db, "report", {k: cfg[k] for k in (*REPORT_DEFAULTS, "lastSentAt")})
+    res["skipped"] = False
+    return res
+
+
+class ReportConfigIn(BaseModel):
+    enabled: Optional[bool] = None
+    frequency: Optional[str] = None
+    dayOfWeek: Optional[int] = None
+    dayOfMonth: Optional[int] = None
+    hour: Optional[int] = None
+    rangeDays: Optional[int] = None
+
+
+@router.get("/admin/settings/report")
+async def admin_get_report_config(
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    return _report_config(db)
+
+
+@router.patch("/admin/settings/report")
+async def admin_save_report_config(
+    body: ReportConfigIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    cfg = _report_config(db)
+    if body.frequency is not None:
+        if body.frequency not in _FREQ_RANGE:
+            raise HTTPException(status_code=400, detail="Frecuencia inválida")
+        cfg["frequency"] = body.frequency
+    if body.enabled is not None:
+        cfg["enabled"] = bool(body.enabled)
+    if body.dayOfWeek is not None:
+        cfg["dayOfWeek"] = max(0, min(6, int(body.dayOfWeek)))
+    if body.dayOfMonth is not None:
+        cfg["dayOfMonth"] = max(1, min(28, int(body.dayOfMonth)))
+    if body.hour is not None:
+        cfg["hour"] = max(0, min(23, int(body.hour)))
+    if body.rangeDays is not None:
+        cfg["rangeDays"] = None if body.rangeDays <= 0 else min(365, int(body.rangeDays))
+    _set_setting(db, "report", {k: cfg.get(k) for k in (*REPORT_DEFAULTS, "lastSentAt")})
+    return _report_config(db)
+
+
+@router.post("/admin/weekly-report/send")
+async def admin_send_weekly_report(
+    authorization: Annotated[str, Header()],
+    to: Optional[str] = None,
+    dry: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Envío manual del reporte. Sin `to`: a todos los admins/leaders (dry lista
+    destinatarios). Con `to`: envío de PRUEBA (resumen de todos los equipos) a
+    esa dirección, sea o no usuario registrado."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    cfg = _report_config(db)
+    range_days = _report_range_days(cfg)
+    period = _FREQ_LABEL.get(cfg.get("frequency"), "el período")
+
+    if to:
+        now = utc_now()
+        summaries = _weekly_summaries(db, [t.id for t in db.query(Team).all()], now - timedelta(days=range_days), now)
+        if dry:
+            return {"preview": True, "to": to, "teams": len(summaries)}
+        html, text = _weekly_report_email("", "Todos los equipos", summaries, period)
+        ok = await send_email(to, f"[Prueba] Reporte de Deck · {period}", html, text)
+        return {"sent": 1 if ok else 0, "to": to, "test": True}
+
+    return await send_weekly_reports(db, dry=dry, range_days=range_days, period_label=period)
+
+
+# ============================================================
+# PERMISOS CONFIGURABLES — quién puede hacer cada acción sobre una card
+# ============================================================
+# Cada acción se permite a un conjunto de "quiénes" (además del admin, que
+# siempre puede). Default = miembros del equipo dueño o compartido (comportamiento
+# histórico: cualquiera del equipo puede editar). El admin lo afina desde la UI.
+
+WHO_TOKENS = ["creator", "assignees", "ownerTeam", "sharedTeam", "anyone"]
+PERMISSION_ACTIONS = [
+    "dueDate", "priority", "dates", "editText", "move",
+    "assignees", "tags", "followers", "share", "complete", "delete",
+]
+PERMISSION_DEFAULT = ["ownerTeam", "sharedTeam"]
+
+
+def _permissions(db: Session) -> Dict[str, List[str]]:
+    stored = _get_setting(db, "permissions") or {}
+    out = {}
+    for a in PERMISSION_ACTIONS:
+        v = stored.get(a)
+        out[a] = [w for w in v if w in WHO_TOKENS] if isinstance(v, list) else list(PERMISSION_DEFAULT)
+    return out
+
+
+def _who_matches(tokens: List[str], ctx: DeckContext, card: DeckCard) -> bool:
+    if "anyone" in tokens:
+        return True
+    uid = ctx.user.id
+    if "creator" in tokens and card.created_by == uid:
+        return True
+    if "assignees" in tokens and any(a.user_id == uid for a in card.assignees):
+        return True
+    if "ownerTeam" in tokens and card.owner_team_id in ctx.team_ids:
+        return True
+    if "sharedTeam" in tokens and any(st.team_id in ctx.team_ids for st in card.shared_teams):
+        return True
+    return False
+
+
+def _can_do(perms: Dict[str, List[str]], action: str, ctx: DeckContext, card: DeckCard) -> bool:
+    if ctx.is_admin():
+        return True
+    return _who_matches(perms.get(action, PERMISSION_DEFAULT), ctx, card)
+
+
+def _require_perm(db: Session, ctx: DeckContext, card: DeckCard, action: str):
+    if not _can_do(_permissions(db), action, ctx, card):
+        raise HTTPException(status_code=403, detail="No tienes permiso para esta acción")
+
+
+def _card_capabilities(db: Session, ctx: DeckContext, card: DeckCard) -> Dict[str, bool]:
+    perms = _permissions(db)
+    return {a: _can_do(perms, a, ctx, card) for a in PERMISSION_ACTIONS}
+
+
+@router.get("/admin/settings/permissions")
+async def admin_get_permissions(
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    return {"permissions": _permissions(db), "actions": PERMISSION_ACTIONS, "who": WHO_TOKENS}
+
+
+class PermissionsIn(BaseModel):
+    permissions: Dict[str, List[str]]
+
+
+@router.patch("/admin/settings/permissions")
+async def admin_save_permissions(
+    body: PermissionsIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    clean = {}
+    for a in PERMISSION_ACTIONS:
+        v = body.permissions.get(a)
+        clean[a] = [w for w in v if w in WHO_TOKENS] if isinstance(v, list) else list(PERMISSION_DEFAULT)
+    _set_setting(db, "permissions", clean)
+    return {"permissions": clean, "actions": PERMISSION_ACTIONS, "who": WHO_TOKENS}
