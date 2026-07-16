@@ -252,6 +252,7 @@ async def listar_empleados(authorization: Annotated[str, Header()], db: Session 
         {
             "id": u.id,
             "nombre": u.display_name,
+            "email": u.email,
             "cargo": u.job_title,
             "departamento": p.departamento if p else None,
         }
