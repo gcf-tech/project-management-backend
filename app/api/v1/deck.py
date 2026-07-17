@@ -2405,12 +2405,13 @@ async def admin_list_teams(
         db.query(User.team_id, func.count(User.id)).filter(User.is_active.is_(True))
         .group_by(User.team_id).all()
     )
-    board_teams = {row[0] for row in db.query(DeckBoard.team_id).filter(DeckBoard.archived.is_(False)).all()}
+    board_by_team = {b.team_id: b.id for b in db.query(DeckBoard).filter(DeckBoard.archived.is_(False)).all()}
     teams = db.query(Team).order_by(Team.name).all()
     return {"teams": [{
         "id": t.id, "name": t.name,
         "memberCount": int(member_counts.get(t.id, 0)),
-        "hasBoard": t.id in board_teams,
+        "hasBoard": t.id in board_by_team,
+        "boardId": board_by_team.get(t.id),
     } for t in teams]}
 
 
@@ -2433,6 +2434,77 @@ async def admin_create_team(
     db.commit()
     db.refresh(team)
     return {"id": team.id, "name": team.name, "memberCount": 0, "hasBoard": False}
+
+
+def _team_brief(db: Session, team: Team) -> Dict[str, Any]:
+    members = db.query(func.count(User.id)).filter(and_(User.team_id == team.id, User.is_active.is_(True))).scalar()
+    board = db.query(DeckBoard).filter(and_(DeckBoard.team_id == team.id, DeckBoard.archived.is_(False))).first()
+    return {"id": team.id, "name": team.name, "memberCount": int(members or 0),
+            "hasBoard": board is not None, "boardId": board.id if board else None}
+
+
+@router.patch("/admin/teams/{team_id}")
+async def admin_rename_team(
+    team_id: int,
+    body: TeamCreate,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    team = db.query(Team).filter(Team.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nombre requerido")
+    if db.query(Team).filter(and_(Team.name == name, Team.id != team_id)).first():
+        raise HTTPException(status_code=409, detail="Ya existe un equipo con ese nombre")
+    team.name = name
+    db.commit()
+    db.refresh(team)
+    return _team_brief(db, team)
+
+
+@router.delete("/admin/teams/{team_id}")
+async def admin_delete_team(
+    team_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    team = db.query(Team).filter(Team.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado")
+    if db.query(DeckBoard).filter(DeckBoard.team_id == team_id).first():
+        raise HTTPException(status_code=409, detail="Elimina primero el tablero del equipo")
+    # Los usuarios de este equipo quedan sin equipo (FK ondelete SET NULL).
+    db.delete(team)
+    db.commit()
+    return {"success": True}
+
+
+@router.delete("/admin/boards/{board_id}")
+async def admin_delete_board(
+    board_id: int,
+    authorization: Annotated[str, Header()],
+    force: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Elimina un tablero (y sus etapas/tarjetas). Con tarjetas requiere force=true."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    _require_admin(ctx)
+    board = _get_board_or_404(db, board_id)
+    n = db.query(func.count(DeckCard.id)).filter(DeckCard.board_id == board_id).scalar() or 0
+    if n > 0 and not force:
+        raise HTTPException(status_code=409, detail=f"El tablero tiene {n} tarjeta(s). Confirma para eliminarlo.")
+    db.delete(board)   # cascade: columnas + tarjetas
+    db.commit()
+    return {"success": True, "deletedCards": int(n)}
 
 
 # ── Importación de tarjetas por CSV (migración) ──────────────────────────────

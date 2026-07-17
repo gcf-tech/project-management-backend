@@ -33,6 +33,11 @@ from app.core.config import NC_URL
 from app.core.datetime_utils import utc_now
 
 TAG_PALETTE = ["#F37022", "#1d2129", "#1f7a44", "#e0a11f", "#d64545", "#5a6473"]
+# Labels de Nextcloud que representan prioridad → campo nativo (no se crean como tag).
+PRIO_LABELS = {"prioridad alta": "high", "prioridad media": "medium", "prioridad baja": "low"}
+PRIO_RANK = {"high": 0, "medium": 1, "low": 2}   # menor = más alta
+# Columnas que implican tarea completada.
+DONE_STACKS = {"completado", "completados", "completed", "done", "finalizado", "terminado", "cerrado", "hecho"}
 STAGE_PALETTE = ["#8a93a3", "#5a6473", "#1c62b0", "#e0a11f", "#1f7a44", "#d64545", "#7a5ea6", "#F37022"]
 
 
@@ -163,11 +168,30 @@ def main():
                 if not title:
                     skipped += 1
                     continue
-                nc_uids = _assigned_uids(card)
-                labels = [l.get("title", "") for l in (card.get("labels") or []) if l.get("title")]
-                print(f"  + [{st.get('title')}] {title[:60]}"
+                nc_uids = list(dict.fromkeys(_assigned_uids(card)))   # dedup, conserva orden
+                # Separar labels de prioridad de etiquetas normales (deduplicadas).
+                prio = None
+                tag_names, seen_tags = [], set()
+                for l in (card.get("labels") or []):
+                    name = (l.get("title") or "").strip()
+                    if not name:
+                        continue
+                    key = name.lower()
+                    if key in PRIO_LABELS:
+                        p = PRIO_LABELS[key]
+                        if prio is None or PRIO_RANK[p] < PRIO_RANK[prio]:
+                            prio = p
+                        continue
+                    if key in seen_tags:
+                        continue
+                    seen_tags.add(key)
+                    tag_names.append(name)
+                is_done = stack_name in DONE_STACKS or bool(card.get("done"))
+                print(f"  + [{st.get('title')}] {title[:55]}"
+                      f"{'  prio:' + prio if prio else ''}"
+                      f"{'  done' if is_done else ''}"
                       f"{'  asig:' + ','.join(nc_uids) if nc_uids else ''}"
-                      f"{'  tags:' + ','.join(labels) if labels else ''}")
+                      f"{'  tags:' + ','.join(tag_names) if tag_names else ''}")
                 if args.dry:
                     created += 1
                     continue
@@ -175,11 +199,11 @@ def main():
                 dc = M.DeckCard(
                     board_id=board.id, column_id=col.id, owner_team_id=board.team_id,
                     title=title[:255], description=(card.get("description") or None),
-                    due_date=_parse_iso(card.get("duedate")),
+                    priority=prio, due_date=_parse_iso(card.get("duedate")),
                     position=_next_pos(db, col.id),
                     created_by=actor.id if actor else None, created_at=utc_now(), updated_at=utc_now(),
                 )
-                if card.get("done"):
+                if is_done:
                     dc.completed_at = _parse_iso(card.get("done")) or utc_now()
                 db.add(dc); db.flush()
 
@@ -196,7 +220,7 @@ def main():
                         follower_ids.add(u.id)
                 for fid in follower_ids:
                     db.add(M.DeckCardFollower(card_id=dc.id, user_id=fid, created_at=utc_now()))
-                for name in labels:
+                for name in tag_names:
                     tag = tags.get(name.strip().lower())
                     if not tag:
                         tag = M.DeckTag(board_id=board.id, name=name[:60],
