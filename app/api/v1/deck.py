@@ -2405,14 +2405,19 @@ async def admin_list_teams(
         db.query(User.team_id, func.count(User.id)).filter(User.is_active.is_(True))
         .group_by(User.team_id).all()
     )
-    board_by_team = {b.team_id: b.id for b in db.query(DeckBoard).filter(DeckBoard.archived.is_(False)).all()}
+    board_by_team = {b.team_id: b for b in db.query(DeckBoard).all()}   # incluye deshabilitados
     teams = db.query(Team).order_by(Team.name).all()
-    return {"teams": [{
-        "id": t.id, "name": t.name,
-        "memberCount": int(member_counts.get(t.id, 0)),
-        "hasBoard": t.id in board_by_team,
-        "boardId": board_by_team.get(t.id),
-    } for t in teams]}
+    out = []
+    for t in teams:
+        b = board_by_team.get(t.id)
+        out.append({
+            "id": t.id, "name": t.name,
+            "memberCount": int(member_counts.get(t.id, 0)),
+            "boardId": b.id if b else None,
+            "hasBoard": b is not None and not b.archived,
+            "boardArchived": bool(b.archived) if b else False,
+        })
+    return {"teams": out}
 
 
 @router.post("/admin/teams")
@@ -2438,9 +2443,13 @@ async def admin_create_team(
 
 def _team_brief(db: Session, team: Team) -> Dict[str, Any]:
     members = db.query(func.count(User.id)).filter(and_(User.team_id == team.id, User.is_active.is_(True))).scalar()
-    board = db.query(DeckBoard).filter(and_(DeckBoard.team_id == team.id, DeckBoard.archived.is_(False))).first()
-    return {"id": team.id, "name": team.name, "memberCount": int(members or 0),
-            "hasBoard": board is not None, "boardId": board.id if board else None}
+    board = db.query(DeckBoard).filter(DeckBoard.team_id == team.id).first()  # activo o deshabilitado
+    return {
+        "id": team.id, "name": team.name, "memberCount": int(members or 0),
+        "boardId": board.id if board else None,
+        "hasBoard": board is not None and not board.archived,   # activo
+        "boardArchived": bool(board.archived) if board else False,
+    }
 
 
 @router.patch("/admin/teams/{team_id}")
