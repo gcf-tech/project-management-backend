@@ -1049,3 +1049,41 @@ class WorkspaceWorkstation(Base):
         Index("idx_workspace_puestos_dept", "dept_id"),
         Index("idx_workspace_puestos_user", "usuario_id"),
     )
+
+
+class WorkspaceMeeting(Base):
+    """Reuniones creadas desde el workspace (agendador de Google Meet). Se persisten
+    para poder mostrar 'tus reuniones de hoy' por usuario."""
+    __tablename__ = "workspace_meetings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    titulo = Column(String(255), nullable=True)
+    meet_url = Column(String(500), nullable=True)
+    inicio = Column(DateTime(timezone=True), nullable=False)
+    fin = Column(DateTime(timezone=True), nullable=True)
+    creador_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    creador = relationship("User", foreign_keys=[creador_id])
+    participantes = relationship(
+        "WorkspaceMeetingParticipant", cascade="all, delete-orphan", back_populates="reunion"
+    )
+
+    __table_args__ = (
+        Index("idx_workspace_meetings_inicio", "inicio"),
+    )
+
+
+class WorkspaceMeetingParticipant(Base):
+    """Participantes internos de una reunión del workspace (para el query por usuario)."""
+    __tablename__ = "workspace_meeting_participants"
+
+    meeting_id = Column(Integer, ForeignKey("workspace_meetings.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+
+    reunion = relationship("WorkspaceMeeting", back_populates="participantes")
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("idx_wmp_user", "user_id"),
+    )

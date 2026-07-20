@@ -17,17 +17,18 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from typing import Annotated, List, Optional
-from datetime import date, datetime
+from datetime import date, datetime, time as dtime
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel
 
 from app.api.dependencies import get_db
 from app.core.security import get_nc_user_info
-from app.core.datetime_utils import utc_now, to_rfc3339_z
+from app.core.datetime_utils import utc_now, to_rfc3339_z, UTC
 from app.services.nextcloud_svc import sync_user_from_nextcloud
 from app.db.models import (
     User, WorkspaceProfile, WorkspaceSession, WorkspaceDailyTime,
     WorkspaceActivity, WorkspaceTask, WorkspaceMessage, WorkspaceWorkstation,
+    WorkspaceMeeting, WorkspaceMeetingParticipant,
 )
 
 router = APIRouter()
@@ -94,6 +95,14 @@ class AsignarPuestoIn(BaseModel):
 class MoverPuestoIn(BaseModel):
     x: int
     y: int
+
+
+class ReunionIn(BaseModel):
+    titulo: Optional[str] = None
+    meetUrl: Optional[str] = None
+    inicio: datetime
+    fin: Optional[datetime] = None
+    participantes: List[int] = []
 
 
 # ============================================================
@@ -595,3 +604,60 @@ async def borrar_puesto(puesto_id: int, authorization: Annotated[str, Header()],
         db.delete(pu)
         db.commit()
     return {"ok": True}
+
+
+# ============================================================
+# REUNIONES (persistidas — "tus reuniones de hoy")
+# ============================================================
+
+@router.post("/reuniones")
+async def crear_reunion(body: ReunionIn, authorization: Annotated[str, Header()], db: Session = Depends(get_db)):
+    user = await _resolve_user(authorization, db)
+    m = WorkspaceMeeting(
+        titulo=body.titulo,
+        meet_url=body.meetUrl,
+        inicio=body.inicio,
+        fin=body.fin,
+        creador_id=user.id,
+        created_at=utc_now(),
+    )
+    db.add(m)
+    db.flush()
+    # participantes internos + el creador, sin duplicados; solo ids de usuarios válidos
+    ids = set(body.participantes or []) | {user.id}
+    validos = {u.id for u in db.query(User.id).filter(User.id.in_(ids)).all()} if ids else set()
+    for uid in validos:
+        db.add(WorkspaceMeetingParticipant(meeting_id=m.id, user_id=uid))
+    db.commit()
+    db.refresh(m)
+    return {"id": m.id}
+
+
+@router.get("/reuniones/hoy")
+async def reuniones_hoy(authorization: Annotated[str, Header()], db: Session = Depends(get_db)):
+    user = await _resolve_user(authorization, db)
+    hoy = business_today()
+    ini = datetime.combine(hoy, dtime.min, tzinfo=BOGOTA).astimezone(UTC)
+    fin = datetime.combine(hoy, dtime.max, tzinfo=BOGOTA).astimezone(UTC)
+    rows = (
+        db.query(WorkspaceMeeting)
+        .join(WorkspaceMeetingParticipant, WorkspaceMeetingParticipant.meeting_id == WorkspaceMeeting.id)
+        .filter(
+            WorkspaceMeetingParticipant.user_id == user.id,
+            WorkspaceMeeting.inicio >= ini,
+            WorkspaceMeeting.inicio <= fin,
+        )
+        .order_by(WorkspaceMeeting.inicio.asc())
+        .all()
+    )
+    return [
+        {
+            "id": m.id,
+            "titulo": m.titulo,
+            "meetUrl": m.meet_url,
+            "inicio": to_rfc3339_z(m.inicio),
+            "fin": to_rfc3339_z(m.fin),
+            "esCreador": m.creador_id == user.id,
+        }
+        for m in rows
+    ]
