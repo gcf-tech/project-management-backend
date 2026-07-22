@@ -3062,6 +3062,65 @@ async def analytics_overview(
             "unit": "min",
         }
 
+    # ── Riesgo de retraso (pronóstico): para cada tarea activa con vencimiento,
+    # se estima cuándo terminará = hoy + tiempo restante (suma del tiempo REAL
+    # promedio de las etapas que le faltan). Si esa fecha supera el vencimiento,
+    # se prevé retraso. Se agrupa por persona y por equipo. ──
+    avg_by_title = {t: (ms / n if n else 0.0) for t, (ms, n) in bt.items()}
+    pos_by_col_r = {c.id: c.position for c in cols}
+    cols_by_board: Dict[int, list] = {}
+    for c in cols:
+        cols_by_board.setdefault(c.board_id, []).append(c)
+
+    def _remaining_ms(card):
+        cur = pos_by_col_r.get(card.column_id)
+        if cur is None:
+            cur = -1
+        total = 0.0
+        for c in cols_by_board.get(card.board_id, []):
+            if c.position >= cur:
+                a = avg_by_title.get(c.title) or ((c.default_minutes or 0) * 60000)
+                total += a
+        return total
+
+    risk_cards = []
+    for c in cards:
+        if c.completed_at or not c.due_date:
+            continue
+        due = _as_utc(c.due_date)
+        rem = _remaining_ms(c)
+        delay = ((now + timedelta(milliseconds=rem)) - due).total_seconds() * 1000  # >0 = tarde
+        risk_cards.append({
+            "cardId": c.id, "title": c.title, "teamId": c.owner_team_id,
+            "assignees": [a.user_id for a in c.assignees],
+            "dueDate": due.isoformat(),
+            "remainingMs": round(rem),
+            "timeLeftMs": round((due - now).total_seconds() * 1000),
+            "delayMs": round(delay),
+            "atRisk": delay > 0,
+        })
+
+    def _agg(key_fn, label_fn):
+        agg: Dict[Any, Dict[str, Any]] = {}
+        for rc in risk_cards:
+            for k in key_fn(rc):
+                e = agg.setdefault(k, {"atRisk": 0, "onTime": 0, "worstDelayMs": 0, "total": 0})
+                e["total"] += 1
+                if rc["atRisk"]:
+                    e["atRisk"] += 1
+                    e["worstDelayMs"] = max(e["worstDelayMs"], rc["delayMs"])
+                else:
+                    e["onTime"] += 1
+        out = [{**label_fn(k), **v} for k, v in agg.items()]
+        out.sort(key=lambda x: (x["atRisk"], x["worstDelayMs"]), reverse=True)
+        return out
+
+    risk = {
+        "cards": risk_cards,
+        "byPerson": _agg(lambda rc: rc["assignees"], lambda uid: {"userId": uid, "displayName": uname.get(uid, f"Usuario {uid}")}),
+        "byTeam": _agg(lambda rc: [rc["teamId"]], lambda tid: {"teamId": tid, "teamName": name_by_team.get(tid)}),
+    }
+
     # ── Resumen por equipo (vista admin de todos) ──
     teams_summary = []
     if is_all:
@@ -3104,6 +3163,7 @@ async def analytics_overview(
         "byProject": by_project,
         "projection": projection,
         "stageProgression": stage_progression,
+        "risk": risk,
         "teams": teams_summary,
     }
 
