@@ -2951,6 +2951,58 @@ async def analytics_overview(
     plan_cards = [c for c in cards if (c.due_date or not c.completed_at) and _cstart(c) and _cdue(c)]
     projection = None
     if plan_cards:
+        # Avance PARCIAL: el esfuerzo "hecho" de una card = suma de minutos de las
+        # etapas que ya pasó (posición < etapa actual). Para saber en qué etapa
+        # estaba en cada fecha se reconstruye su historial (created + moved).
+        pos_by_col = {c.id: c.position for c in cols}
+        effort_before: Dict[tuple, int] = {}   # (board_id, position) -> min de etapas anteriores
+        for c in cols:
+            effort_before[(c.board_id, c.position)] = sum(
+                (cc.default_minutes or 0) for cc in cols if cc.board_id == c.board_id and cc.position < c.position
+            )
+        act_rows = db.query(DeckActivity).filter(and_(
+            DeckActivity.card_id.in_([c.id for c in plan_cards]),
+            DeckActivity.event_type.in_(("created", "moved")),
+        )).order_by(DeckActivity.card_id, DeckActivity.created_at).all()
+        acts_by_card: Dict[int, list] = {}
+        for a in act_rows:
+            acts_by_card.setdefault(a.card_id, []).append(a)
+        seq_by_card: Dict[int, list] = {}     # card_id -> [(ts, column_id)] ordenado
+        for c in plan_cards:
+            acts = acts_by_card.get(c.id, [])
+            moves = [a for a in acts if a.event_type == "moved" and a.payload and a.payload.get("to") is not None]
+            if moves and moves[0].payload.get("from") is not None:
+                start = moves[0].payload["from"]
+            elif moves:
+                start = None
+            else:
+                start = c.column_id
+            seq = []
+            created = next((a for a in acts if a.event_type == "created"), None)
+            if start is not None:
+                seq.append((_as_utc(created.created_at) if created else _cstart(c), start))
+            for m in moves:
+                seq.append((_as_utc(m.created_at), m.payload["to"]))
+            seq_by_card[c.id] = seq
+
+        def _done_effort(c, d):
+            comp = _as_utc(c.completed_at) if c.completed_at else None
+            if comp and comp <= d:
+                return float(_effort(c))          # completada → esfuerzo total
+            stage_col = None
+            for ts, col in seq_by_card.get(c.id, ()):
+                if ts and ts <= d:
+                    stage_col = col
+                else:
+                    break
+            if stage_col is None:                 # sin historial: su columna actual desde el inicio
+                s = _cstart(c)
+                stage_col = c.column_id if (s and d >= s) else None
+            if stage_col is None:
+                return 0.0
+            pos = pos_by_col.get(stage_col)
+            return float(effort_before.get((c.board_id, pos), 0)) if pos is not None else 0.0
+
         t0 = min(_cstart(c) for c in plan_cards)
         t1 = max(max(_cdue(c) for c in plan_cards), now)
         span_days = max(1, (t1 - t0).days)
@@ -2968,9 +3020,7 @@ async def analytics_overview(
                     frac = (d - s).total_seconds() / (du - s).total_seconds()
                     frac = 0.0 if frac < 0 else (1.0 if frac > 1 else frac)
                 planned += e * frac
-                comp = _as_utc(c.completed_at) if c.completed_at else None
-                if comp and comp <= d:
-                    actual += e
+                actual += _done_effort(c, d)
             return planned, actual
 
         points = []
