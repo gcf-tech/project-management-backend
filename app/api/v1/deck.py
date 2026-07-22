@@ -2766,6 +2766,7 @@ def _stage_durations(db: Session, cards: List[DeckCard]):
 async def analytics_overview(
     authorization: Annotated[str, Header()],
     teamId: Optional[int] = None,
+    userId: Optional[int] = None,
     days: int = 30,
     db: Session = Depends(get_db),
 ):
@@ -2795,6 +2796,20 @@ async def analytics_overview(
     cards = db.query(DeckCard).filter(
         and_(DeckCard.owner_team_id.in_(scope_ids or [0]), DeckCard.archived.is_(False))
     ).all()
+
+    # Personas asignadas en el alcance (opciones del filtro por usuario) + filtro.
+    scope_assignees = db.query(DeckCardAssignee).filter(
+        DeckCardAssignee.card_id.in_([c.id for c in cards] or [0])
+    ).all()
+    scope_uids = {a.user_id for a in scope_assignees}
+    uname = {u.id: u.display_name for u in db.query(User).filter(User.id.in_(scope_uids or [0])).all()}
+    scope_users = sorted(
+        [{"userId": uid, "displayName": uname.get(uid, f"Usuario {uid}")} for uid in scope_uids],
+        key=lambda u: u["displayName"].lower(),
+    )
+    if userId:
+        assigned_ids = {a.card_id for a in scope_assignees if a.user_id == userId}
+        cards = [c for c in cards if c.id in assigned_ids]
 
     boards = db.query(DeckBoard).filter(DeckBoard.team_id.in_(scope_ids or [0])).all()
     cols = db.query(DeckColumn).filter(DeckColumn.board_id.in_([b.id for b in boards] or [0])).all()
@@ -3003,6 +3018,8 @@ async def analytics_overview(
             "teamNames": [name_by_team.get(t) for t in scope_ids],
             "isAll": is_all,
             "days": days,
+            "users": scope_users,
+            "userId": userId,
         },
         "totals": {
             "total": total, "backlog": backlog, "inProgress": inprogress, "completed": completed,
