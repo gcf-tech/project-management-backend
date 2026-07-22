@@ -14,8 +14,9 @@ Team membership is NOT managed here: it lives in users.team_id, synced from
 Nextcloud groups (see app/services/nextcloud_svc.py).
 """
 import asyncio
+import json
 from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 import os
 import csv
@@ -27,6 +28,7 @@ from datetime import datetime, date, timedelta, timezone
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_db
+from app.db.database import SessionLocal
 from app.core.security import get_nc_user_info
 from app.services.nextcloud_svc import push_nc_notification
 from app.services.email_svc import send_email, build_notification_email
@@ -553,6 +555,51 @@ _NOTIF_FOR_EVENT = {
 }
 
 
+# ============================================================
+# TIEMPO REAL — bus en memoria + SSE por tablero
+# ============================================================
+# Nota: el bus vive en el proceso. Con un solo worker/réplica funciona directo;
+# si se escala a varios, migrar a Redis pub/sub (los suscriptores de otro proceso
+# no reciben el publish). Suficiente para el despliegue actual.
+
+class _EventBus:
+    def __init__(self):
+        self._subs: Dict[int, set] = {}   # board_id -> set[asyncio.Queue]
+
+    def subscribe(self, board_id: int) -> "asyncio.Queue":
+        q: asyncio.Queue = asyncio.Queue(maxsize=200)
+        self._subs.setdefault(board_id, set()).add(q)
+        return q
+
+    def unsubscribe(self, board_id: int, q: "asyncio.Queue"):
+        s = self._subs.get(board_id)
+        if s:
+            s.discard(q)
+            if not s:
+                self._subs.pop(board_id, None)
+
+    def publish(self, board_id: int, event: dict):
+        for q in list(self._subs.get(board_id, ())):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
+
+
+_bus = _EventBus()
+
+
+def _publish_card_event(board_id: Optional[int], card_id: Optional[int], event_type: str, actor_id: Optional[int]):
+    """Emite un evento a los clientes suscritos al tablero (best-effort, no rompe
+    la petición si algo falla)."""
+    if not board_id:
+        return
+    try:
+        _bus.publish(board_id, {"boardId": board_id, "cardId": card_id, "type": event_type, "actorId": actor_id})
+    except Exception:
+        pass
+
+
 def _log_activity(db: Session, card: DeckCard, actor: Optional[User], event_type: str, *,
                   payload=None, message=None, extra_recipients=None, notify=True) -> DeckActivity:
     """Append an immutable activity row and (optionally) fan out notifications
@@ -567,6 +614,7 @@ def _log_activity(db: Session, card: DeckCard, actor: Optional[User], event_type
     )
     db.add(act)
     db.flush()  # need act.id for notification linkage
+    _publish_card_event(card.board_id, card.id, event_type, actor.id if actor else None)
 
     if not notify:
         return act
@@ -1386,9 +1434,47 @@ async def delete_card(
     ctx = _build_deck_context(db, user)
     card = _get_card_or_404(db, card_id)
     _require_perm(db, ctx, card, "delete")
+    board_id = card.board_id
     db.delete(card)
     db.commit()
+    _publish_card_event(board_id, card_id, "deleted", user.id)
     return {"success": True}
+
+
+@router.get("/events")
+async def board_events(board: int, authorization: Annotated[str, Header()]):
+    """Stream SSE de eventos del tablero (tiempo real). El cliente se suscribe por
+    board y recibe {boardId, cardId, type, actorId} en cada cambio."""
+    # Auth con sesión efímera: no mantenemos una conexión de BD abierta durante
+    # toda la vida del stream.
+    db = SessionLocal()
+    try:
+        user = await _get_current_user(authorization, db)
+        ctx = _build_deck_context(db, user)
+        board_obj = _get_board_or_404(db, board)
+        _require_see_board(ctx, board_obj)
+    finally:
+        db.close()
+
+    q = _bus.subscribe(board)
+
+    async def gen():
+        try:
+            yield ": connected\n\n"
+            while True:
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=25.0)
+                    yield f"data: {json.dumps(ev)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"   # keep-alive para proxies
+        finally:
+            _bus.unsubscribe(board, q)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    })
 
 
 # ============================================================
@@ -2822,6 +2908,75 @@ async def analytics_overview(
     by_project = [{"projectId": pid, "name": pnames.get(pid, "—"), **st} for pid, st in proj.items()]
     by_project.sort(key=lambda x: x["total"], reverse=True)
 
+    # ── Proyección: plan vs avance por ESFUERZO (tiempo estimado por etapa) ──
+    # El esfuerzo de una card = suma de los minutos estimados de las etapas de su
+    # tablero. La curva "plan" reparte ese esfuerzo entre inicio→vence; como se
+    # suma sobre todas las cards, los solapamientos de un usuario se acumulan.
+    effort_by_board: Dict[int, int] = {}
+    for c in cols:
+        effort_by_board[c.board_id] = effort_by_board.get(c.board_id, 0) + (c.default_minutes or 0)
+
+    def _effort(card):
+        e = effort_by_board.get(card.board_id, 0)
+        return e if e > 0 else 60   # fallback si el tablero no tiene tiempos configurados
+
+    def _cstart(card):
+        return _as_utc(card.start_date or card.created_at) or _as_utc(card.due_date)
+
+    def _cdue(card):
+        # Deadline: la fecha de vencimiento si existe; si no, inicio + el tiempo
+        # estimado de las etapas del tablero (fecha estimada de finalización).
+        if card.due_date:
+            return _as_utc(card.due_date)
+        s = _cstart(card)
+        return s + timedelta(minutes=_effort(card)) if s else None
+
+    # Incluye cards con vencimiento explícito y las abiertas (deadline implícito);
+    # las ya completadas sin vencimiento no aportan (trabajo pasado sin deadline).
+    plan_cards = [c for c in cards if (c.due_date or not c.completed_at) and _cstart(c) and _cdue(c)]
+    projection = None
+    if plan_cards:
+        t0 = min(_cstart(c) for c in plan_cards)
+        t1 = max(max(_cdue(c) for c in plan_cards), now)
+        span_days = max(1, (t1 - t0).days)
+        step = max(1, (span_days + 59) // 60)   # ≤ ~61 puntos
+
+        def _pa(d):
+            planned = actual = 0.0
+            for c in plan_cards:
+                e = _effort(c)
+                s = _cstart(c)
+                du = _cdue(c)
+                if du <= s:
+                    frac = 1.0 if d >= du else 0.0
+                else:
+                    frac = (d - s).total_seconds() / (du - s).total_seconds()
+                    frac = 0.0 if frac < 0 else (1.0 if frac > 1 else frac)
+                planned += e * frac
+                comp = _as_utc(c.completed_at) if c.completed_at else None
+                if comp and comp <= d:
+                    actual += e
+            return planned, actual
+
+        points = []
+        d = t0
+        while d < t1:
+            p, a = _pa(d)
+            points.append({"date": d.date().isoformat(), "planned": round(p), "actual": round(a)})
+            d = d + timedelta(days=step)
+        p, a = _pa(t1)
+        points.append({"date": t1.date().isoformat(), "planned": round(p), "actual": round(a)})
+        pt, at = _pa(now)
+        projection = {
+            "points": points,
+            "total": round(sum(_effort(c) for c in plan_cards)),
+            "today": now.date().isoformat(),
+            "plannedToday": round(pt),
+            "actualToday": round(at),
+            "count": len(plan_cards),
+            "unit": "min",
+        }
+
     # ── Resumen por equipo (vista admin de todos) ──
     teams_summary = []
     if is_all:
@@ -2860,6 +3015,7 @@ async def analytics_overview(
         "byUser": by_user,
         "byPriority": by_priority,
         "byProject": by_project,
+        "projection": projection,
         "teams": teams_summary,
     }
 
