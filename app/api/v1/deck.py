@@ -2879,18 +2879,22 @@ async def analytics_overview(
     } for t, (ms, n) in bt.items()]
     bottleneck.sort(key=lambda x: x["avgMs"], reverse=True)
 
-    # ── Progresión por etapa: estimado (tiempo de etapa) vs ejecutado (real prom.) ──
-    est_by_title: Dict[str, List[int]] = {}
+    # ── Progresión por etapa: estimado TOTAL (tiempo etapa × nº de tarjetas que
+    # pasaron) vs ejecutado real TOTAL (suma del tiempo de calendario, no promedio). ──
+    est_min_by_title: Dict[str, int] = {}
     for c in cols:
-        est_by_title.setdefault(c.title, []).append(c.default_minutes or 0)
-    actual_by_title = {b["title"]: b["avgMs"] for b in bottleneck}
-    stage_progression = [{
-        "title": t,
-        "position": meta.get("position", 99),
-        "color": meta.get("color"),
-        "estMin": round(sum(est_by_title.get(t, [0])) / max(1, len(est_by_title.get(t, [0])))),
-        "actualMs": round(actual_by_title.get(t, 0)),
-    } for t, meta in stage_meta.items()]
+        est_min_by_title.setdefault(c.title, c.default_minutes or 0)   # config por etapa (un board → un valor)
+    stage_progression = []
+    for t, meta in stage_meta.items():
+        tot_ms, n = bt.get(t, [0.0, 0])
+        stage_progression.append({
+            "title": t,
+            "position": meta.get("position", 99),
+            "color": meta.get("color"),
+            "cards": int(n),
+            "estMs": round(est_min_by_title.get(t, 0) * 60000 * n),   # estimado × nº tarjetas
+            "actualMs": round(tot_ms),                                 # real total (suma)
+        })
     stage_progression.sort(key=lambda x: x["position"])
 
     # ── Carga por usuario ──
