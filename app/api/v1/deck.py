@@ -2879,6 +2879,20 @@ async def analytics_overview(
     } for t, (ms, n) in bt.items()]
     bottleneck.sort(key=lambda x: x["avgMs"], reverse=True)
 
+    # ── Progresión por etapa: estimado (tiempo de etapa) vs ejecutado (real prom.) ──
+    est_by_title: Dict[str, List[int]] = {}
+    for c in cols:
+        est_by_title.setdefault(c.title, []).append(c.default_minutes or 0)
+    actual_by_title = {b["title"]: b["avgMs"] for b in bottleneck}
+    stage_progression = [{
+        "title": t,
+        "position": meta.get("position", 99),
+        "color": meta.get("color"),
+        "estMin": round(sum(est_by_title.get(t, [0])) / max(1, len(est_by_title.get(t, [0])))),
+        "actualMs": round(actual_by_title.get(t, 0)),
+    } for t, meta in stage_meta.items()]
+    stage_progression.sort(key=lambda x: x["position"])
+
     # ── Carga por usuario ──
     card_by_id = {c.id: c for c in cards}
     a_rows = db.query(DeckCardAssignee).filter(
@@ -3083,6 +3097,7 @@ async def analytics_overview(
         "byPriority": by_priority,
         "byProject": by_project,
         "projection": projection,
+        "stageProgression": stage_progression,
         "teams": teams_summary,
     }
 
