@@ -75,6 +75,8 @@ def main():
     ap.add_argument("--target-board", type=int)
     ap.add_argument("--target-team")
     ap.add_argument("--keep-stages", action="store_true")
+    ap.add_argument("--replace", action="store_true",
+                    help="Borra las cards existentes del board destino antes de importar (re-migrar sin duplicar).")
     ap.add_argument("--dry", action="store_true")
     args = ap.parse_args()
 
@@ -107,6 +109,16 @@ def main():
         if not board:
             sys.exit("No encontré el board destino (usa --target-board <id> o --target-team <nombre>).")
         print(f"[APP] Board destino: '{board.title}' (id {board.id}, equipo {board.team_id})")
+
+        if args.replace and not args.dry:
+            old = db.query(M.DeckCard).filter(M.DeckCard.board_id == board.id).all()
+            for c in old:
+                db.delete(c)
+            db.flush()
+            print(f"[APP] --replace: {len(old)} cards existentes borradas del board destino.")
+        elif args.replace and args.dry:
+            n = db.query(M.DeckCard).filter(M.DeckCard.board_id == board.id).count()
+            print(f"[APP] --replace (dry): se borrarían {n} cards existentes del board destino.")
 
         actor = (db.query(M.User).filter(M.User.nc_user_id == user).first()
                  or db.query(M.User).filter(M.User.deck_role == "admin").first()

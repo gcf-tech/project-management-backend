@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from typing import Annotated, List, Optional
-from datetime import date, datetime, time as dtime
+from datetime import date, datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel
 
@@ -658,6 +658,48 @@ async def reuniones_hoy(authorization: Annotated[str, Header()], db: Session = D
             "inicio": to_rfc3339_z(m.inicio),
             "fin": to_rfc3339_z(m.fin),
             "esCreador": m.creador_id == user.id,
+        }
+        for m in rows
+    ]
+
+
+@router.get("/reuniones/historial")
+async def reuniones_historial(authorization: Annotated[str, Header()], dias: int = 30, db: Session = Depends(get_db)):
+    user = await _resolve_user(authorization, db)
+    dias = max(1, min(dias, 365))
+    hoy = business_today()
+    inicio_hoy = datetime.combine(hoy, dtime.min, tzinfo=BOGOTA).astimezone(UTC)
+    desde = datetime.combine(hoy - timedelta(days=dias), dtime.min, tzinfo=BOGOTA).astimezone(UTC)
+    rows = (
+        db.query(WorkspaceMeeting)
+        .join(WorkspaceMeetingParticipant, WorkspaceMeetingParticipant.meeting_id == WorkspaceMeeting.id)
+        .filter(
+            WorkspaceMeetingParticipant.user_id == user.id,
+            WorkspaceMeeting.inicio < inicio_hoy,   # anteriores a hoy (hoy va en /reuniones/hoy)
+            WorkspaceMeeting.inicio >= desde,
+        )
+        .order_by(WorkspaceMeeting.inicio.desc())
+        .limit(50)
+        .all()
+    )
+    ids = [m.id for m in rows]
+    counts = {}
+    if ids:
+        for mid, cnt in (
+            db.query(WorkspaceMeetingParticipant.meeting_id, func.count())
+            .filter(WorkspaceMeetingParticipant.meeting_id.in_(ids))
+            .group_by(WorkspaceMeetingParticipant.meeting_id)
+            .all()
+        ):
+            counts[mid] = cnt
+    return [
+        {
+            "id": m.id,
+            "titulo": m.titulo,
+            "inicio": to_rfc3339_z(m.inicio),
+            "fin": to_rfc3339_z(m.fin),
+            "esCreador": m.creador_id == user.id,
+            "participantes": counts.get(m.id, 0),
         }
         for m in rows
     ]
