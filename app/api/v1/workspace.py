@@ -12,6 +12,7 @@ Notas:
 - La entrega en vivo del chat la hace el WebSocket propio del workspace; aquí solo se
   persiste y se sirve el historial.
 """
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
@@ -22,6 +23,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel
 
 from app.api.dependencies import get_db
+from app.core.config import NC_URL
 from app.core.security import get_nc_user_info
 from app.core.datetime_utils import utc_now, to_rfc3339_z, UTC
 from app.services.nextcloud_svc import sync_user_from_nextcloud
@@ -201,7 +203,9 @@ def _minutos_hoy(db: Session, user_id: int, dia: date) -> int:
 async def get_mi_perfil(authorization: Annotated[str, Header()], db: Session = Depends(get_db)):
     user = await _resolve_user(authorization, db)
     prof = _get_or_create_profile(db, user.id)
-    return _perfil_dict(user, prof)
+    d = _perfil_dict(user, prof)
+    d["nc_user_id"] = user.nc_user_id  # para identificar "mis" mensajes en Talk
+    return d
 
 
 @router.get("/perfil/{user_id}")
@@ -703,3 +707,104 @@ async def reuniones_historial(authorization: Annotated[str, Header()], dias: int
         }
         for m in rows
     ]
+
+
+# ============================================================
+# NEXTCLOUD TALK (chat unificado) — proxy con el token del usuario
+# ============================================================
+# La UI de Talk no se puede embeber (X-Frame cross-subdominio), pero su API OCS sí
+# funciona con el token OAuth del usuario (misma auth que /cloud/user). El chat del
+# workspace se apoya en Talk: los mensajes viven en Nextcloud (móvil/escritorio/web).
+
+_TALK = f"{NC_URL}/ocs/v2.php/apps/spreed"
+
+
+class MensajeTalkIn(BaseModel):
+    message: str
+
+
+class OneToOneIn(BaseModel):
+    userId: int
+
+
+async def _talk(method: str, path: str, authorization: str, *, params=None, data=None):
+    headers = {"Authorization": authorization, "OCS-APIRequest": "true", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=40.0) as client:
+        resp = await client.request(method, f"{_TALK}{path}", headers=headers, params=params, data=data)
+    if resp.status_code == 401:
+        raise HTTPException(status_code=401, detail="Token inválido para Talk")
+    # 304 Not Modified / cuerpo vacío = sin novedades (típico del sondeo de chat)
+    if resp.status_code == 304 or not resp.content:
+        return []
+    try:
+        payload = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Respuesta no-JSON de Talk")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=f"Talk error: {resp.text[:200]}")
+    return payload.get("ocs", {}).get("data")
+
+
+@router.get("/talk/rooms")
+async def talk_rooms(authorization: Annotated[str, Header()]):
+    """Lista las conversaciones del usuario (bandeja)."""
+    data = await _talk("GET", "/api/v4/room", authorization)
+    rooms = []
+    for r in (data or []):
+        lm = r.get("lastMessage")
+        rooms.append({
+            "token": r.get("token"),
+            "name": r.get("displayName"),
+            "type": r.get("type"),
+            "unread": r.get("unreadMessages", 0),
+            "lastActivity": r.get("lastActivity"),
+            "lastMessage": (lm or {}).get("message") if isinstance(lm, dict) else None,
+        })
+    rooms.sort(key=lambda x: x.get("lastActivity") or 0, reverse=True)
+    return rooms
+
+
+@router.post("/talk/one-to-one")
+async def talk_one_to_one(body: OneToOneIn, authorization: Annotated[str, Header()], db: Session = Depends(get_db)):
+    """Abre (o reutiliza) la conversación 1:1 con otro usuario del workspace."""
+    target = db.query(User).filter(User.id == body.userId).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    data = await _talk("POST", "/api/v4/room", authorization, data={"roomType": 1, "invite": target.nc_user_id})
+    return {"token": (data or {}).get("token"), "name": (data or {}).get("displayName")}
+
+
+@router.get("/talk/rooms/{token}/messages")
+async def talk_messages(token: str, authorization: Annotated[str, Header()], lastKnownMessageId: int = 0):
+    """Mensajes de una conversación, en orden cronológico.
+    - lastKnownMessageId=0 → historial reciente (lookIntoFuture=0).
+    - lastKnownMessageId>0 → solo lo NUEVO desde ese id (lookIntoFuture=1, no bloqueante)."""
+    nuevos = lastKnownMessageId > 0
+    params = {
+        "lookIntoFuture": 1 if nuevos else 0,
+        "limit": 50,
+        "lastKnownMessageId": lastKnownMessageId,
+        "setReadMarker": 1,
+    }
+    if nuevos:
+        params["timeout"] = 0  # sondeo no-bloqueante (el cliente hace polling por intervalo)
+    data = await _talk("GET", f"/api/v1/chat/{token}", authorization, params=params)
+    msgs = [
+        {
+            "id": m.get("id"),
+            "actorId": m.get("actorId"),
+            "actorName": m.get("actorDisplayName"),
+            "message": m.get("message"),
+            "timestamp": m.get("timestamp"),
+        }
+        for m in (data or []) if not m.get("systemMessage")
+    ]
+    msgs.sort(key=lambda x: x["id"] or 0)  # id monotónico → orden cronológico sin depender de la dirección
+    return msgs
+
+
+@router.post("/talk/rooms/{token}/messages")
+async def talk_send(token: str, body: MensajeTalkIn, authorization: Annotated[str, Header()]):
+    """Envía un mensaje a una conversación."""
+    data = await _talk("POST", f"/api/v1/chat/{token}", authorization, data={"message": body.message})
+    return {"id": (data or {}).get("id")}
