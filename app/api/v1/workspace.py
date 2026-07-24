@@ -13,7 +13,7 @@ Notas:
   persiste y se sirve el historial.
 """
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from sqlalchemy.dialects.mysql import insert as mysql_insert
@@ -808,3 +808,21 @@ async def talk_send(token: str, body: MensajeTalkIn, authorization: Annotated[st
     """Envía un mensaje a una conversación."""
     data = await _talk("POST", f"/api/v1/chat/{token}", authorization, data={"message": body.message})
     return {"id": (data or {}).get("id")}
+
+
+@router.get("/talk/rooms/{token}/avatar")
+async def talk_avatar(token: str, authorization: Annotated[str, Header()]):
+    """Imagen de la conversación (foto del usuario en 1:1, del grupo, o generada)."""
+    headers = {"Authorization": authorization, "OCS-APIRequest": "true"}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(f"{_TALK}/api/v1/room/{token}/avatar", headers=headers)
+    except Exception:
+        raise HTTPException(status_code=502, detail="No se pudo obtener el avatar")
+    if resp.status_code != 200 or not resp.content:
+        raise HTTPException(status_code=404, detail="Sin avatar")
+    return Response(
+        content=resp.content,
+        media_type=resp.headers.get("content-type", "image/png"),
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
