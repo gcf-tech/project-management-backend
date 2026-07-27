@@ -12,8 +12,10 @@ Notas:
 - La entrega en vivo del chat la hace el WebSocket propio del workspace; aquí solo se
   persiste y se sirve el historial.
 """
+import re
+import urllib.parse
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Header, Response
+from fastapi import APIRouter, Depends, HTTPException, Header, Response, File, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from sqlalchemy.dialects.mysql import insert as mysql_insert
@@ -789,17 +791,23 @@ async def talk_messages(token: str, authorization: Annotated[str, Header()], las
     if nuevos:
         params["timeout"] = 0  # sondeo no-bloqueante (el cliente hace polling por intervalo)
     data = await _talk("GET", f"/api/v1/chat/{token}", authorization, params=params)
-    msgs = [
-        {
+    msgs = []
+    for m in (data or []):
+        if m.get("systemMessage"):
+            continue
+        text = m.get("message")
+        params = m.get("messageParameters") or {}
+        f = params.get("file") if isinstance(params, dict) else None
+        if isinstance(f, dict) and f.get("name"):
+            text = f"📎 {f['name']}"  # mensaje de archivo compartido
+        msgs.append({
             "id": m.get("id"),
             "actorId": m.get("actorId"),
             "actorName": m.get("actorDisplayName"),
-            "message": m.get("message"),
+            "message": text,
             "timestamp": m.get("timestamp"),
-        }
-        for m in (data or []) if not m.get("systemMessage")
-    ]
-    msgs.sort(key=lambda x: x["id"] or 0)  # id monotónico → orden cronológico sin depender de la dirección
+        })
+    msgs.sort(key=lambda x: x["id"] or 0)  # id monotónico → orden cronológico
     return msgs
 
 
@@ -808,6 +816,49 @@ async def talk_send(token: str, body: MensajeTalkIn, authorization: Annotated[st
     """Envía un mensaje a una conversación."""
     data = await _talk("POST", f"/api/v1/chat/{token}", authorization, data={"message": body.message})
     return {"id": (data or {}).get("id")}
+
+
+def _safe_name(name: Optional[str]) -> str:
+    name = (name or "archivo").replace("\\", "/").split("/")[-1]
+    name = re.sub(r'[\r\n"]+', "", name).strip() or "archivo"
+    return name[:120]
+
+
+@router.post("/talk/rooms/{token}/attachment")
+async def talk_attachment(token: str, authorization: Annotated[str, Header()], file: UploadFile = File(...)):
+    """Adjunta un archivo a la conversación: lo sube a Nextcloud (WebDAV) y lo comparte
+    a la sala (shareType=10), lo que publica el archivo como mensaje en el chat."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Archivo vacío")
+    nc = await get_nc_user_info(authorization)
+    uid = nc["id"]
+    fname = _safe_name(file.filename)
+    remote_name = f"{utc_now().strftime('%Y%m%d%H%M%S')}-{fname}"
+    dav_base = f"{NC_URL}/remote.php/dav/files/{urllib.parse.quote(uid)}"
+    put_url = f"{dav_base}/Talk/{urllib.parse.quote(remote_name)}"
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        # asegurar la carpeta Talk (ignora si ya existe)
+        try:
+            await client.request("MKCOL", f"{dav_base}/Talk/", headers={"Authorization": authorization})
+        except Exception:
+            pass
+        put = await client.put(
+            put_url,
+            headers={"Authorization": authorization, "Content-Type": file.content_type or "application/octet-stream"},
+            content=content,
+        )
+        if put.status_code not in (200, 201, 204):
+            raise HTTPException(status_code=502, detail=f"No se pudo subir el archivo (dav {put.status_code})")
+        share = await client.post(
+            f"{NC_URL}/ocs/v2.php/apps/files_sharing/api/v1/shares",
+            headers={"Authorization": authorization, "OCS-APIRequest": "true", "Accept": "application/json"},
+            # OJO: el path va SIN slash inicial ("Talk/x", no "/Talk/x") o da 404.
+            data={"path": f"Talk/{remote_name}", "shareType": 10, "shareWith": token},
+        )
+        if share.status_code not in (200, 201):
+            raise HTTPException(status_code=502, detail=f"No se pudo compartir el archivo ({share.status_code})")
+    return {"ok": True, "file": fname}
 
 
 @router.get("/talk/rooms/{token}/avatar")
