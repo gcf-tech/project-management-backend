@@ -217,11 +217,18 @@ async def _get_current_user(authorization: str, db: Session) -> User:
 
 class DeckContext:
     """Resolved Deck access context for the current user."""
-    def __init__(self, user: User, role: str, team_ids: set, visible_board_ids):
+    def __init__(self, user: User, role: str, team_ids: set, visible_board_ids, own_board_ids=None):
         self.user = user
         self.role = role                       # "admin" | "leader" | "member"
         self.team_ids = team_ids               # set[int] — user's team(s)
-        self.visible_board_ids = visible_board_ids  # set[int] or None (= all)
+        self.visible_board_ids = visible_board_ids  # set[int] or None (= all): boards ACCESIBLES (propios + con cards compartidas)
+        # Tableros PROPIOS del equipo (None = admin/todos). Los que solo son
+        # accesibles por una card compartida NO están aquí: no salen en el selector
+        # y su list_cards se limita a las cards compartidas.
+        self.own_board_ids = own_board_ids
+
+    def owns_board(self, board_id: int) -> bool:
+        return self.own_board_ids is None or board_id in self.own_board_ids
 
     def is_admin(self) -> bool:
         return self.role == "admin"
@@ -272,7 +279,7 @@ def _build_deck_context(db: Session, user: User) -> DeckContext:
     team_ids = {user.team_id} if user.team_id else set()
 
     if role == "admin":
-        return DeckContext(user, "admin", team_ids, None)  # all boards
+        return DeckContext(user, "admin", team_ids, None, None)  # all boards
 
     own = set()
     shared = set()
@@ -283,9 +290,11 @@ def _build_deck_context(db: Session, user: User) -> DeckContext:
             .join(DeckCardTeam, DeckCardTeam.card_id == DeckCard.id)
             .filter(DeckCardTeam.team_id.in_(team_ids)).distinct().all()
         }
-    # leader y member comparten visibilidad de tableros (propios + compartidos);
-    # el leader solo se distingue por el acceso a la analítica de su equipo.
-    return DeckContext(user, role, team_ids, own | shared)
+    # leader y member comparten visibilidad de tableros; el leader solo se
+    # distingue por el acceso a la analítica de su equipo. `own | shared` da
+    # ACCESO (para abrir cards compartidas y sus etapas), pero solo `own` sale
+    # en el selector y ve el tablero completo; en los ajenos, solo lo compartido.
+    return DeckContext(user, role, team_ids, own | shared, own)
 
 
 def _get_board_or_404(db: Session, board_id: int) -> DeckBoard:
@@ -760,7 +769,9 @@ async def bootstrap(
 def _visible_boards(db: Session, ctx: DeckContext) -> List[DeckBoard]:
     q = db.query(DeckBoard).filter(DeckBoard.archived.is_(False))
     if not ctx.is_admin():
-        ids = ctx.visible_board_ids or set()
+        # Solo tableros PROPIOS en el selector; los ajenos con cards compartidas
+        # NO se listan (sus cards aparecen como "compartidas conmigo" en el board propio).
+        ids = ctx.own_board_ids or set()
         if not ids:
             return []
         q = q.filter(DeckBoard.id.in_(ids))
@@ -996,10 +1007,17 @@ async def delete_column(
 # ============================================================
 
 def _load_board_cards(db: Session, ctx: DeckContext, board: DeckBoard) -> List[DeckCard]:
-    cards = db.query(DeckCard).filter(
+    q = db.query(DeckCard).filter(
         and_(DeckCard.board_id == board.id, DeckCard.archived.is_(False))
-    ).order_by(DeckCard.position).all()
-    return cards
+    )
+    # En un tablero ajeno (accesible solo por cards compartidas) se ven ÚNICAMENTE
+    # las cards compartidas con el equipo del usuario, no todo el tablero.
+    if not ctx.is_admin() and not ctx.owns_board(board.id):
+        shared_card_ids = db.query(DeckCardTeam.card_id).filter(
+            DeckCardTeam.team_id.in_(ctx.team_ids or [0])
+        )
+        q = q.filter(DeckCard.id.in_(shared_card_ids))
+    return q.order_by(DeckCard.position).all()
 
 
 @router.get("/boards/{board_id}/cards")
@@ -2408,9 +2426,16 @@ async def board_timeline(
     board = _get_board_or_404(db, board_id)
     _require_see_board(ctx, board)
 
-    cards = db.query(DeckCard).filter(
+    tq = db.query(DeckCard).filter(
         and_(DeckCard.board_id == board_id, DeckCard.archived.is_(False))
-    ).order_by(DeckCard.due_date).all()
+    )
+    # Tablero ajeno (solo compartido): únicamente las cards compartidas con el equipo.
+    if not ctx.is_admin() and not ctx.owns_board(board_id):
+        shared_card_ids = db.query(DeckCardTeam.card_id).filter(
+            DeckCardTeam.team_id.in_(ctx.team_ids or [0])
+        )
+        tq = tq.filter(DeckCard.id.in_(shared_card_ids))
+    cards = tq.order_by(DeckCard.due_date).all()
 
     out = []
     for c in cards:
