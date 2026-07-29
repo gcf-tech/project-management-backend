@@ -29,6 +29,7 @@ from app.core.config import NC_URL
 from app.core.security import get_nc_user_info
 from app.core.datetime_utils import utc_now, to_rfc3339_z, UTC
 from app.services.nextcloud_svc import sync_user_from_nextcloud
+from app.services.email_svc import send_email
 from app.db.models import (
     User, WorkspaceProfile, WorkspaceSession, WorkspaceDailyTime,
     WorkspaceActivity, WorkspaceTask, WorkspaceMessage, WorkspaceWorkstation,
@@ -779,6 +780,42 @@ async def deck_tareas(user_id: int, authorization: Annotated[str, Header()], lim
         for c in rows
     ]
     return {"total": total, "cards": cards}
+
+
+# ============================================================
+# "LLAMAR LA ATENCIÓN" (nudge) — al acercarse a alguien: aviso in-app + correo
+# ============================================================
+
+class NudgeIn(BaseModel):
+    targetUserId: int
+
+
+@router.post("/nudge")
+async def nudge(body: NudgeIn, authorization: Annotated[str, Header()], db: Session = Depends(get_db)):
+    caller = await _resolve_user(authorization, db)
+    target = db.query(User).filter(User.id == body.targetUserId).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    enviado = False
+    if target.email:
+        quien = caller.display_name or "Un compañero"
+        subject = f"👋 {quien} te llama la atención en el Workspace"
+        html = f"""<!doctype html><html><body style="margin:0;background:#f4f6fa;padding:24px;font-family:Inter,Arial,sans-serif;">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #dde3ec;border-radius:14px;overflow:hidden;">
+    <div style="background:#2B3242;padding:16px 22px;color:#fff;font-weight:800;font-size:16px;">GCF · Workspace</div>
+    <div style="padding:22px;">
+      <p style="margin:0 0 10px;font-size:15px;color:#1c2430;">Hola {target.display_name or ''},</p>
+      <p style="margin:0 0 12px;font-size:15px;color:#1c2430;"><b>{quien}</b> te está llamando la atención en el Workspace 👋</p>
+      <a href="https://workspace.gcf.group" style="display:inline-block;margin-top:8px;background:#C4641A;color:#fff;text-decoration:none;font-weight:700;padding:10px 18px;border-radius:9px;font-size:14px;">Entrar al Workspace</a>
+    </div>
+    <div style="padding:14px 22px;border-top:1px solid #eef1f6;color:#8a93a3;font-size:12px;">Notificación automática · no respondas a este correo.</div>
+  </div></body></html>"""
+        text = f"{quien} te está llamando la atención en el Workspace. Entra: https://workspace.gcf.group"
+        try:
+            enviado = await send_email(target.email, subject, html, text)
+        except Exception:
+            enviado = False
+    return {"ok": True, "email": bool(enviado)}
 
 
 # ============================================================
