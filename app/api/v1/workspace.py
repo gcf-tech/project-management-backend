@@ -33,6 +33,7 @@ from app.db.models import (
     User, WorkspaceProfile, WorkspaceSession, WorkspaceDailyTime,
     WorkspaceActivity, WorkspaceTask, WorkspaceMessage, WorkspaceWorkstation,
     WorkspaceMeeting, WorkspaceMeetingParticipant,
+    DeckCard, DeckCardAssignee, DeckColumn,
 )
 
 router = APIRouter()
@@ -616,6 +617,29 @@ async def borrar_puesto(puesto_id: int, authorization: Annotated[str, Header()],
 # REUNIONES (persistidas — "tus reuniones de hoy")
 # ============================================================
 
+def _ical_esc(s: str) -> str:
+    return str(s or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+
+async def _crear_evento_caldav(authorization, nc_user_id, ev_uid, titulo, inicio, fin, descripcion=""):
+    """Best-effort: crea un VEVENT en el calendario 'personal' de Nextcloud del usuario."""
+    def fmt(dt):
+        return dt.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    lines = [
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//GCF//Workspace//ES", "CALSCALE:GREGORIAN",
+        "BEGIN:VEVENT", f"UID:{ev_uid}@gcf-workspace", f"DTSTAMP:{fmt(utc_now())}",
+        f"DTSTART:{fmt(inicio)}", f"DTEND:{fmt(fin)}", f"SUMMARY:{_ical_esc(titulo)}",
+    ]
+    if descripcion:
+        lines.append(f"DESCRIPTION:{_ical_esc(descripcion)}")
+    lines += ["END:VEVENT", "END:VCALENDAR"]
+    payload = ("\r\n".join(lines) + "\r\n").encode("utf-8")
+    url = f"{NC_URL}/remote.php/dav/calendars/{urllib.parse.quote(nc_user_id)}/personal/{urllib.parse.quote(ev_uid)}.ics"
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        r = await client.put(url, headers={"Authorization": authorization, "Content-Type": "text/calendar; charset=utf-8"}, content=payload)
+    return r.status_code in (200, 201, 204)
+
+
 @router.post("/reuniones")
 async def crear_reunion(body: ReunionIn, authorization: Annotated[str, Header()], db: Session = Depends(get_db)):
     user = await _resolve_user(authorization, db)
@@ -636,6 +660,15 @@ async def crear_reunion(body: ReunionIn, authorization: Annotated[str, Header()]
         db.add(WorkspaceMeetingParticipant(meeting_id=m.id, user_id=uid))
     db.commit()
     db.refresh(m)
+
+    # también crear el evento en el calendario Nextcloud del organizador (best-effort)
+    try:
+        fin_dt = body.fin or (body.inicio + timedelta(hours=1))
+        desc = ("Reunión de GCF Workspace. " + (body.meetUrl or "")).strip()
+        await _crear_evento_caldav(authorization, user.nc_user_id, f"gcfws-{m.id}",
+                                   body.titulo or "Reunión", body.inicio, fin_dt, desc)
+    except Exception:
+        pass
     return {"id": m.id}
 
 
@@ -712,6 +745,43 @@ async def reuniones_historial(authorization: Annotated[str, Header()], dias: int
 
 
 # ============================================================
+# DECK — tareas activas de un usuario (para la ficha de perfil in-world)
+# ============================================================
+
+@router.get("/deck-tareas/{user_id}")
+async def deck_tareas(user_id: int, authorization: Annotated[str, Header()], limit: int = 3, db: Session = Depends(get_db)):
+    await _resolve_user(authorization, db)  # valida el token
+    base = (
+        db.query(DeckCard)
+        .join(DeckCardAssignee, DeckCardAssignee.card_id == DeckCard.id)
+        .filter(
+            DeckCardAssignee.user_id == user_id,
+            DeckCard.completed_at.is_(None),
+            DeckCard.archived == False,  # noqa: E712
+        )
+    )
+    total = base.count()
+    rows = base.order_by(DeckCard.updated_at.desc()).limit(min(max(limit, 1), 10)).all()
+    col_ids = {c.column_id for c in rows if c.column_id}
+    cols = {}
+    if col_ids:
+        for cid, title, color in db.query(DeckColumn.id, DeckColumn.title, DeckColumn.color).filter(DeckColumn.id.in_(col_ids)).all():
+            cols[cid] = (title, color)
+    cards = [
+        {
+            "id": c.id,
+            "title": c.title,
+            "priority": c.priority,
+            "stage": cols.get(c.column_id, (None, None))[0],
+            "stageColor": cols.get(c.column_id, (None, None))[1],
+            "dueDate": to_rfc3339_z(c.due_date),
+        }
+        for c in rows
+    ]
+    return {"total": total, "cards": cards}
+
+
+# ============================================================
 # NEXTCLOUD TALK (chat unificado) — proxy con el token del usuario
 # ============================================================
 # La UI de Talk no se puede embeber (X-Frame cross-subdominio), pero su API OCS sí
@@ -758,6 +828,8 @@ async def talk_rooms(authorization: Annotated[str, Header()]):
             "token": r.get("token"),
             "name": r.get("displayName"),
             "type": r.get("type"),
+            # en 1:1 (type 1), room.name es el userId del otro → avatar directo de Nextcloud
+            "peerId": r.get("name") if r.get("type") == 1 else None,
             "unread": r.get("unreadMessages", 0),
             "lastActivity": r.get("lastActivity"),
             "lastMessage": (lm or {}).get("message") if isinstance(lm, dict) else None,

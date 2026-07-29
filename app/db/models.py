@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean,
-    Enum, Date, DateTime, DECIMAL, ForeignKey, CheckConstraint, Time, Index, JSON, LargeBinary
+    Enum, Date, DateTime, DECIMAL, ForeignKey, CheckConstraint, Time, Index, JSON, LargeBinary, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.mysql import LONGBLOB
@@ -785,9 +785,30 @@ class DeckComment(Base):
 
     card = relationship("DeckCard", back_populates="comments")
     user = relationship("User", foreign_keys=[user_id])
+    reactions = relationship("DeckCommentReaction", back_populates="comment", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_deck_comments_card", "card_id", "created_at"),
+    )
+
+
+class DeckCommentReaction(Base):
+    """Reacción rápida a un comentario (👍 ✅ ❤️ 🎉 …). Un usuario puede poner
+    varios emojis distintos, pero cada (comentario, usuario, emoji) es único."""
+    __tablename__ = "deck_comment_reactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    comment_id = Column(Integer, ForeignKey("deck_comments.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    emoji = Column(String(32), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    comment = relationship("DeckComment", back_populates="reactions")
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        UniqueConstraint("comment_id", "user_id", "emoji", name="uq_deck_comment_reaction"),
+        Index("idx_deck_comment_reaction", "comment_id"),
     )
 
 

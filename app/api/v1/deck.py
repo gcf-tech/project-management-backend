@@ -49,6 +49,7 @@ from app.db.models import (
     DeckTag,
     DeckCardTag,
     DeckComment,
+    DeckCommentReaction,
     DeckActivity,
     DeckNotification,
     DeckAttachment,
@@ -163,6 +164,17 @@ class SubtaskIn(BaseModel):
     dueDate: Optional[str] = None
     columnId: Optional[int] = None
     assigneeIds: List[int] = Field(default_factory=list)
+
+
+class BulkSubtaskIn(BaseModel):
+    titles: List[str] = Field(default_factory=list)
+    boardId: Optional[int] = None
+    columnId: Optional[int] = None
+    assigneeIds: List[int] = Field(default_factory=list)
+    priority: Optional[str] = None
+    startDate: Optional[str] = None
+    dueDate: Optional[str] = None
+    tagIds: List[int] = Field(default_factory=list)
 
 
 class AssigneeIn(BaseModel):
@@ -498,7 +510,31 @@ def _serialize_attachment(a: DeckAttachment) -> Dict[str, Any]:
     }
 
 
-def _serialize_comment(c: DeckComment, attachments: Optional[List[DeckAttachment]] = None) -> Dict[str, Any]:
+# Reacciones permitidas (acuse rápido de "leído/acatado").
+ALLOWED_REACTIONS = ["👍", "✅", "❤️", "🎉", "👀"]
+
+
+def _group_reactions(reactions: Optional[List["DeckCommentReaction"]], me: Optional[int]) -> List[Dict[str, Any]]:
+    """Agrupa reacciones por emoji: {emoji, count, mine, users:[{...}]}."""
+    by: Dict[str, Dict[str, Any]] = {}
+    order: List[str] = []
+    for r in (reactions or []):
+        g = by.get(r.emoji)
+        if g is None:
+            g = {"emoji": r.emoji, "count": 0, "mine": False, "users": []}
+            by[r.emoji] = g
+            order.append(r.emoji)
+        g["count"] += 1
+        if me is not None and r.user_id == me:
+            g["mine"] = True
+        if r.user:
+            g["users"].append(_user_brief(r.user))
+    return [by[e] for e in order]
+
+
+def _serialize_comment(c: DeckComment, attachments: Optional[List[DeckAttachment]] = None,
+                       reactions: Optional[List["DeckCommentReaction"]] = None,
+                       me: Optional[int] = None) -> Dict[str, Any]:
     return {
         "id": c.id,
         "cardId": c.card_id,
@@ -510,6 +546,7 @@ def _serialize_comment(c: DeckComment, attachments: Optional[List[DeckAttachment
         "deleted": c.deleted_at is not None,
         "editable": _within_edit_window(c.created_at) and c.deleted_at is None,
         "attachments": [_serialize_attachment(a) for a in (attachments or [])],
+        "reactions": _group_reactions(reactions, me),
         "createdAt": c.created_at.isoformat() if c.created_at else None,
     }
 
@@ -1140,9 +1177,22 @@ async def subtask_context(
         b = _user_brief(m); b["sameTeam"] = (m.team_id == board.team_id); b["teamId"] = m.team_id
         members.append(b)
     members.sort(key=lambda b: (not b["sameTeam"],))
+    # Campos heredables de la tarea principal (prefill del wizard/bulk). Las
+    # etiquetas solo aplican si la subtarea vive en el MISMO board (mismos tag ids).
+    same_board = parent.board_id == board.id
+    parent_defaults = {
+        "priority": parent.priority,
+        "startDate": parent.start_date.isoformat() if parent.start_date else None,
+        "dueDate": parent.due_date.isoformat() if parent.due_date else None,
+        "assigneeIds": [a.user_id for a in parent.assignees],
+        "tagIds": [ct.tag_id for ct in parent.tags] if same_board else [],
+        "tags": [_serialize_tag(ct.tag) for ct in parent.tags if ct.tag] if same_board else [],
+        "sameBoard": same_board,
+    }
     return {
         "boardId": board.id, "boardTitle": board.title, "teamName": board.team.name if board.team else None,
         "columns": [_serialize_column(c) for c in cols], "members": members,
+        "parent": parent_defaults,
     }
 
 
@@ -1191,6 +1241,71 @@ async def create_subtask(
     db.commit()
     db.refresh(card)
     return _serialize_subtask(card)
+
+
+@router.post("/cards/{card_id}/subtasks/bulk")
+async def create_subtasks_bulk(
+    card_id: int,
+    body: BulkSubtaskIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Crea varias subtareas de golpe (una por título). Todas van al mismo board/columna."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    parent = _get_card_or_404(db, card_id)
+    _require_see_card_or_parent(db, ctx, parent)
+
+    titles = [t.strip()[:255] for t in (body.titles or []) if t and t.strip()]
+    if not titles:
+        raise HTTPException(status_code=400, detail="No hay títulos válidos")
+    if len(titles) > 100:
+        raise HTTPException(status_code=400, detail="Máximo 100 subtareas por lote")
+
+    board = _resolve_subtask_board(db, ctx, user, parent, body.boardId)
+    col = None
+    if body.columnId:
+        col = db.query(DeckColumn).filter(and_(DeckColumn.id == body.columnId, DeckColumn.board_id == board.id)).first()
+    if not col:
+        col = db.query(DeckColumn).filter(DeckColumn.board_id == board.id).order_by(DeckColumn.position).first()
+
+    pos = _next_position(db, DeckCard, column_id=col.id) if col else 0
+    assignee_ids = list(dict.fromkeys(body.assigneeIds))
+    start_dt = _parse_dt(body.startDate)
+    due_dt = _parse_dt(body.dueDate)
+    # Etiquetas heredadas: solo las que existan en el board destino.
+    tag_ids = []
+    if body.tagIds:
+        tag_ids = [t.id for t in db.query(DeckTag).filter(
+            and_(DeckTag.id.in_(body.tagIds), DeckTag.board_id == board.id)
+        ).all()]
+    created = []
+    for title in titles:
+        card = DeckCard(
+            board_id=board.id, column_id=col.id if col else None,
+            owner_team_id=board.team_id, parent_card_id=parent.id,
+            title=title, position=pos, priority=body.priority,
+            start_date=start_dt, due_date=due_dt,
+            created_by=user.id, created_at=utc_now(), updated_at=utc_now(),
+        )
+        pos += 1
+        db.add(card)
+        db.flush()
+        db.add(DeckCardTeam(card_id=card.id, team_id=board.team_id, is_owner=True, shared_by=user.id, created_at=utc_now()))
+        for uid in assignee_ids:
+            db.add(DeckCardAssignee(card_id=card.id, user_id=uid, assigned_by=user.id, created_at=utc_now()))
+        for uid in dict.fromkeys([user.id, *assignee_ids]):
+            db.add(DeckCardFollower(card_id=card.id, user_id=uid, created_at=utc_now()))
+        for tid in tag_ids:
+            db.add(DeckCardTag(card_id=card.id, tag_id=tid, created_at=utc_now()))
+        db.flush()
+        _log_activity(db, card, user, "created", message=f"{user.display_name} creó esta subtarea", notify=False)
+        created.append(card)
+
+    db.commit()
+    for c in created:
+        db.refresh(c)
+    return {"subtasks": [_serialize_subtask(c) for c in created], "count": len(created)}
 
 
 @router.post("/boards/{board_id}/cards")
@@ -1676,7 +1791,13 @@ async def list_comments(
     for a in atts:
         if a.comment_id:
             by_comment.setdefault(a.comment_id, []).append(a)
-    return {"comments": [_serialize_comment(c, by_comment.get(c.id)) for c in rows]}
+    # Batch-load reactions.
+    cids = [c.id for c in rows]
+    rrows = db.query(DeckCommentReaction).filter(DeckCommentReaction.comment_id.in_(cids or [0])).all()
+    by_react: Dict[int, List[DeckCommentReaction]] = {}
+    for r in rrows:
+        by_react.setdefault(r.comment_id, []).append(r)
+    return {"comments": [_serialize_comment(c, by_comment.get(c.id), by_react.get(c.id), user.id) for c in rows]}
 
 
 @router.post("/cards/{card_id}/comments")
@@ -1770,6 +1891,46 @@ async def delete_comment(
     comment.deleted_at = utc_now()
     db.commit()
     return {"success": True}
+
+
+class ReactionIn(BaseModel):
+    emoji: str
+
+
+@router.post("/comments/{comment_id}/reactions")
+async def toggle_comment_reaction(
+    comment_id: int,
+    body: ReactionIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Agrega/quita una reacción emoji del usuario actual a un comentario
+    (acuse rápido de 'leído/acatado'). Puede reaccionar quien ve la card."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    comment = db.query(DeckComment).filter(DeckComment.id == comment_id).first()
+    if not comment or comment.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    card = _get_card_or_404(db, comment.card_id)
+    _require_see_card(ctx, card)
+
+    emoji = (body.emoji or "").strip()
+    if emoji not in ALLOWED_REACTIONS:
+        raise HTTPException(status_code=400, detail="Emoji no permitido")
+
+    row = db.query(DeckCommentReaction).filter(and_(
+        DeckCommentReaction.comment_id == comment_id,
+        DeckCommentReaction.user_id == user.id,
+        DeckCommentReaction.emoji == emoji,
+    )).first()
+    if row:
+        db.delete(row)
+    else:
+        db.add(DeckCommentReaction(comment_id=comment_id, user_id=user.id, emoji=emoji, created_at=utc_now()))
+    db.commit()
+
+    reactions = db.query(DeckCommentReaction).filter(DeckCommentReaction.comment_id == comment_id).all()
+    return {"commentId": comment_id, "reactions": _group_reactions(reactions, user.id)}
 
 
 # ============================================================
@@ -2753,8 +2914,11 @@ def _stage_durations(db: Session, cards: List[DeckCard]):
             seq.append((start, created.created_at))
         for m in moves:
             seq.append((m.payload["to"], m.created_at))
+        # Si la tarea está completada, el reloj se detiene ahí (sin importar la
+        # etapa en que quedó); si no, corre hasta ahora.
+        end_cap = _as_utc(card.completed_at) if card.completed_at else now
         for i, (stage, at) in enumerate(seq):
-            end = seq[i + 1][1] if i + 1 < len(seq) else now
+            end = seq[i + 1][1] if i + 1 < len(seq) else end_cap
             dur = (_as_utc(end) - _as_utc(at)).total_seconds() * 1000
             if dur > 0 and stage is not None:
                 stage_ms[stage] = stage_ms.get(stage, 0) + dur
