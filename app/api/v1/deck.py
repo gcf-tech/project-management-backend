@@ -2327,10 +2327,18 @@ async def list_notifications(
     user = await _get_current_user(authorization, db)
     _ensure_due_soon_notifications(db, user)
 
-    q = db.query(DeckNotification).filter(DeckNotification.user_id == user.id)
+    base = db.query(DeckNotification).filter(DeckNotification.user_id == user.id)
     if unread:
-        q = q.filter(DeckNotification.is_read.is_(False))
-    rows = q.order_by(DeckNotification.created_at.desc()).limit(min(limit, 100)).all()
+        rows = base.filter(DeckNotification.is_read.is_(False))\
+            .order_by(DeckNotification.created_at.desc()).limit(min(limit, 200)).all()
+    else:
+        # El panel muestra TODAS las no leídas (para que el conteo cuadre con la
+        # lista) + las leídas más recientes hasta completar el límite.
+        unread_rows = base.filter(DeckNotification.is_read.is_(False))\
+            .order_by(DeckNotification.created_at.desc()).limit(200).all()
+        read_rows = base.filter(DeckNotification.is_read.is_(True))\
+            .order_by(DeckNotification.created_at.desc()).limit(min(limit, 100)).all()
+        rows = unread_rows + read_rows
 
     title_by_card = {}
     card_ids = {n.card_id for n in rows if n.card_id}
@@ -2494,6 +2502,44 @@ async def board_shared_cards(
             DeckCard.archived.is_(False),
         )
     ).order_by(DeckCard.updated_at.desc()).all()
+    dicts = [_serialize_card(c, full=True) for c in cards]
+    _augment_user_flags(db, user, dicts)
+    return {"cards": dicts}
+
+
+@router.get("/following-cards")
+async def following_cards(
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Cards que el usuario SIGUE en tableros ajenos (no de su equipo) y que NO
+    están compartidas con su equipo. Son personales: solo las ve él/ella."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    team_ids = ctx.team_ids or set()
+
+    # Tableros de mi(s) equipo(s) — se excluyen (esas ya salen en la lista normal).
+    my_board_ids = {
+        b.id for b in db.query(DeckBoard.id).filter(DeckBoard.team_id.in_(team_ids or [0])).all()
+    } if team_ids else set()
+    # Cards ya compartidas con mi equipo — se excluyen (salen en "compartidas").
+    shared_ids = {
+        row[0] for row in db.query(DeckCardTeam.card_id).filter(
+            and_(DeckCardTeam.team_id.in_(team_ids or [0]), DeckCardTeam.is_owner.is_(False))
+        ).all()
+    } if team_ids else set()
+
+    q = db.query(DeckCard).join(
+        DeckCardFollower, DeckCardFollower.card_id == DeckCard.id
+    ).filter(
+        and_(
+            DeckCardFollower.user_id == user.id,
+            DeckCard.archived.is_(False),
+        )
+    )
+    if my_board_ids:
+        q = q.filter(~DeckCard.board_id.in_(my_board_ids))
+    cards = [c for c in q.order_by(DeckCard.updated_at.desc()).all() if c.id not in shared_ids]
     dicts = [_serialize_card(c, full=True) for c in cards]
     _augment_user_flags(db, user, dicts)
     return {"cards": dicts}
