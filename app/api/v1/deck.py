@@ -467,6 +467,9 @@ def _serialize_card(card: DeckCard, *, full=False, sub=None) -> Dict[str, Any]:
             {"teamId": st.team_id, "name": st.team.name if st.team else None, "isOwner": bool(st.is_owner)}
             for st in card.shared_teams
         ]
+        out["createdBy"] = _user_brief(card.creator) if card.creator else None
+        out["boardTitle"] = card.board.title if card.board else None
+        out["teamName"] = card.owner_team.name if card.owner_team else None
         out["commentCount"] = sum(1 for c in card.comments if not c.deleted_at)
         out["activityCount"] = len(card.activity)
     else:
@@ -1082,6 +1085,11 @@ async def get_card(
     out["isFavorite"] = db.query(DeckCardFavorite).filter_by(user_id=user.id, card_id=card.id).first() is not None
     out["hasUnread"] = False
     out["can"] = _card_capabilities(db, ctx, card)
+    # Rastro del padre (para subtareas): id + título del card padre.
+    if card.parent_card_id:
+        p = db.query(DeckCard.id, DeckCard.title).filter(DeckCard.id == card.parent_card_id).first()
+        if p:
+            out["parent"] = {"id": p[0], "title": p[1]}
     return out
 
 
@@ -1404,24 +1412,44 @@ async def patch_card(
         if not _can_do(perms, action, ctx, card):
             raise HTTPException(status_code=403, detail="No tienes permiso para este cambio")
 
+    changed_fields = []          # etiquetas legibles de lo que cambió
+    changes = {}                 # detalle from/to por campo (para el activity)
+
     if body.title is not None or body.description is not None:
         _gate("editText")
-    if body.title is not None:
+    if body.title is not None and body.title != card.title:
+        changes["title"] = {"from": card.title, "to": body.title}
+        changed_fields.append("título")
         card.title = body.title
-    if body.description is not None:
+    if body.description is not None and (body.description or None) != (card.description or None):
+        changes["description"] = True   # marcamos que cambió (no guardamos el texto viejo)
+        changed_fields.append("descripción")
         card.description = body.description
     if body.projectId is not None:
         _gate("editText")
+        if body.projectId != card.project_id:
+            changed_fields.append("proyecto")
         card.project_id = body.projectId
     if body.priority is not None:
         _gate("priority")
+        if body.priority != card.priority:
+            changes["priority"] = {"from": card.priority, "to": body.priority}
+            changed_fields.append("prioridad")
         card.priority = body.priority
     if body.prototypeUrl is not None:
         _gate("editText")
-        card.prototype_url = body.prototypeUrl or None
+        new_proto = body.prototypeUrl or None
+        if new_proto != card.prototype_url:
+            changed_fields.append("prototipo")
+        card.prototype_url = new_proto
     if body.startDate is not None:
         _gate("dates")
-        card.start_date = _parse_dt(body.startDate)
+        new_start = _parse_dt(body.startDate)
+        if new_start != card.start_date:
+            _log_activity(db, card, user, "start_changed",
+                          payload={"to": new_start.isoformat() if new_start else None},
+                          message=f"{user.display_name} cambió la fecha de inicio")
+        card.start_date = new_start
     if body.dueDate is not None:
         _gate("dueDate")
         old_due = card.due_date
@@ -1429,9 +1457,12 @@ async def patch_card(
         if old_due != card.due_date:
             _log_activity(db, card, user, "due_changed",
                           payload={"to": card.due_date.isoformat() if card.due_date else None},
-                          message=f"{user.display_name} changed the due date")
+                          message=f"{user.display_name} cambió la fecha de vencimiento")
     card.updated_at = utc_now()
-    _log_activity(db, card, user, "updated", message=f"{user.display_name} updated this card")
+    if changed_fields:
+        _log_activity(db, card, user, "updated",
+                      payload={"fields": changed_fields, "changes": changes},
+                      message=f"{user.display_name} editó: {', '.join(changed_fields)}")
     db.commit()
     db.refresh(card)
     return _serialize_card(card, full=True)
