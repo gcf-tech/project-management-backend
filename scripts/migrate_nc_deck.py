@@ -221,9 +221,9 @@ def main():
 
                 db.add(M.DeckCardTeam(card_id=dc.id, team_id=board.team_id, is_owner=True,
                                       shared_by=actor.id if actor else None, created_at=utc_now()))
+                # NO agregar al operador de la migración como follower: solo los
+                # asignados reales de la card en Nextcloud siguen la tarjeta.
                 follower_ids = set()
-                if actor:
-                    follower_ids.add(actor.id)
                 for uid in nc_uids:
                     u = by_uid.get(uid)
                     if u:

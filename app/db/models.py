@@ -1108,3 +1108,23 @@ class WorkspaceMeetingParticipant(Base):
     __table_args__ = (
         Index("idx_wmp_user", "user_id"),
     )
+
+
+class WorkspaceNews(Base):
+    """Novedades del Holding mostradas en el tablero de News del workspace:
+    notas de colaboradores, avisos empresariales, felicitaciones de cumpleaños, etc."""
+    __tablename__ = "workspace_news"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tipo = Column(String(30), nullable=False, default="nota")  # nota | empresa | cumple | evento
+    titulo = Column(String(255), nullable=True)
+    cuerpo = Column(Text, nullable=False)
+    autor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    fijado = Column(Boolean, default=False, nullable=False, server_default="0")
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    autor = relationship("User", foreign_keys=[autor_id])
+
+    __table_args__ = (
+        Index("idx_workspace_news_created", "created_at"),
+    )

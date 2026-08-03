@@ -3337,21 +3337,39 @@ async def analytics_overview(
     cols_by_board: Dict[int, list] = {}
     for c in cols:
         cols_by_board.setdefault(c.board_id, []).append(c)
+    # Límites de etapa por board: primera (creación) y última (completado).
+    board_bounds: Dict[int, tuple] = {}
+    for bid, clist in cols_by_board.items():
+        positions = [c.position for c in clist]
+        board_bounds[bid] = (min(positions), max(positions), len(clist))
 
     def _remaining_ms(card):
         cur = pos_by_col_r.get(card.column_id)
         if cur is None:
-            cur = -1
+            return 0.0
+        lo, hi, ncols = board_bounds.get(card.board_id, (0, 0, 1))
+        exclude_last = ncols >= 3   # en tableros con ≥3 etapas, la última es "completado" (sin trabajo)
         total = 0.0
         for c in cols_by_board.get(card.board_id, []):
-            if c.position >= cur:
-                a = avg_by_title.get(c.title) or ((c.default_minutes or 0) * 60000)
-                total += a
+            if c.position < cur:
+                continue
+            if exclude_last and c.position >= hi:  # no contar la etapa de completado
+                continue
+            a = avg_by_title.get(c.title) or ((c.default_minutes or 0) * 60000)
+            total += a
         return total
 
     risk_cards = []
     for c in cards:
         if c.completed_at or not c.due_date:
+            continue
+        # Excluir del pronóstico las tareas en la PRIMERA etapa (creación: aún no
+        # empiezan → no tiene sentido decir que se atrasarán) y en la ÚLTIMA
+        # (completado: ya terminaron). La última solo se excluye si el tablero
+        # tiene ≥3 etapas (para no vaciar tableros de 2 columnas).
+        cur = pos_by_col_r.get(c.column_id)
+        lo, hi, ncols = board_bounds.get(c.board_id, (None, None, 1))
+        if cur is None or lo is None or cur <= lo or (ncols >= 3 and cur >= hi):
             continue
         due = _as_utc(c.due_date)
         rem = _remaining_ms(c)

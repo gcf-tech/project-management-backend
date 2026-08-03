@@ -33,7 +33,7 @@ from app.services.email_svc import send_email
 from app.db.models import (
     User, WorkspaceProfile, WorkspaceSession, WorkspaceDailyTime,
     WorkspaceActivity, WorkspaceTask, WorkspaceMessage, WorkspaceWorkstation,
-    WorkspaceMeeting, WorkspaceMeetingParticipant,
+    WorkspaceMeeting, WorkspaceMeetingParticipant, WorkspaceNews,
     DeckCard, DeckCardAssignee, DeckColumn,
 )
 
@@ -986,3 +986,98 @@ async def talk_avatar(token: str, authorization: Annotated[str, Header()]):
         media_type=resp.headers.get("content-type", "image/png"),
         headers={"Cache-Control": "private, max-age=3600"},
     )
+
+
+# ============================================================
+# NEWS — tablero de novedades del Holding
+#  Notas de colaboradores, avisos empresariales, cumpleaños, etc.
+# ============================================================
+
+class NewsIn(BaseModel):
+    cuerpo: str
+    titulo: Optional[str] = None
+    tipo: Optional[str] = "nota"  # nota | empresa | cumple | evento
+
+
+_NEWS_TIPOS = {"nota", "empresa", "cumple", "evento"}
+
+
+def _news_dict(n: WorkspaceNews) -> dict:
+    a = n.autor
+    return {
+        "id": n.id,
+        "tipo": n.tipo,
+        "titulo": n.titulo,
+        "cuerpo": n.cuerpo,
+        "fijado": bool(n.fijado),
+        "created_at": to_rfc3339_z(n.created_at),
+        "autor_id": n.autor_id,
+        "autor_nombre": a.display_name if a else None,
+        "autor_ncid": a.nc_user_id if a else None,
+    }
+
+
+@router.get("/news")
+async def listar_news(
+    authorization: Annotated[str, Header()],
+    limit: int = 30,
+    db: Session = Depends(get_db),
+):
+    """Últimas novedades: primero las fijadas, luego por fecha descendente."""
+    await _resolve_user(authorization, db)  # requiere sesión válida
+    limit = max(1, min(limit, 100))
+    rows = (
+        db.query(WorkspaceNews)
+        .order_by(WorkspaceNews.fijado.desc(), WorkspaceNews.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [_news_dict(n) for n in rows]
+
+
+@router.post("/news")
+async def crear_news(
+    body: NewsIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Publica una novedad (nota de colaborador). El autor es el usuario del token."""
+    user = await _resolve_user(authorization, db)
+    cuerpo = (body.cuerpo or "").strip()
+    if not cuerpo:
+        raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío")
+    tipo = (body.tipo or "nota").strip().lower()
+    if tipo not in _NEWS_TIPOS:
+        tipo = "nota"
+    # Solo un gerente/admin puede publicar avisos "empresa" (comunicados oficiales).
+    if tipo == "empresa" and not _is_manager(user):
+        tipo = "nota"
+    n = WorkspaceNews(
+        tipo=tipo,
+        titulo=(body.titulo or "").strip() or None,
+        cuerpo=cuerpo[:4000],
+        autor_id=user.id,
+        created_at=utc_now(),
+    )
+    db.add(n)
+    db.commit()
+    db.refresh(n)
+    return _news_dict(n)
+
+
+@router.delete("/news/{news_id}")
+async def borrar_news(
+    news_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Borra una novedad. Solo el autor o un gerente/admin."""
+    user = await _resolve_user(authorization, db)
+    n = db.query(WorkspaceNews).filter(WorkspaceNews.id == news_id).first()
+    if not n:
+        raise HTTPException(status_code=404, detail="Novedad no encontrada")
+    if n.autor_id != user.id and not _is_manager(user):
+        raise HTTPException(status_code=403, detail="No puedes borrar esta novedad")
+    db.delete(n)
+    db.commit()
+    return {"ok": True}
