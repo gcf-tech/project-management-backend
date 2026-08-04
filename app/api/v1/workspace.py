@@ -907,13 +907,23 @@ async def talk_messages(token: str, authorization: Annotated[str, Header()], las
         text = m.get("message")
         params = m.get("messageParameters") or {}
         f = params.get("file") if isinstance(params, dict) else None
+        file_info = None
         if isinstance(f, dict) and f.get("name"):
-            text = f"📎 {f['name']}"  # mensaje de archivo compartido
+            mimetype = (f.get("mimetype") or "")
+            file_info = {
+                "id": f.get("id"),
+                "name": f.get("name"),
+                "mimetype": mimetype,
+                "isImage": mimetype.startswith("image/"),
+                "link": f.get("link"),
+            }
+            text = f"📎 {f['name']}"  # fallback textual
         msgs.append({
             "id": m.get("id"),
             "actorId": m.get("actorId"),
             "actorName": m.get("actorDisplayName"),
             "message": text,
+            "file": file_info,
             "timestamp": m.get("timestamp"),
         })
     msgs.sort(key=lambda x: x["id"] or 0)  # id monotónico → orden cronológico
@@ -968,6 +978,25 @@ async def talk_attachment(token: str, authorization: Annotated[str, Header()], f
         if share.status_code not in (200, 201):
             raise HTTPException(status_code=502, detail=f"No se pudo compartir el archivo ({share.status_code})")
     return {"ok": True, "file": fname}
+
+
+@router.get("/talk/file")
+async def talk_file(fileId: int, authorization: Annotated[str, Header()], x: int = 1024, y: int = 1024):
+    """Preview de un archivo (imagen) compartido en Talk. Lo trae de Nextcloud con el
+    token del usuario y lo devuelve como bytes, para mostrarlo inline en el chat."""
+    url = f"{NC_URL}/index.php/core/preview?fileId={fileId}&x={x}&y={y}&a=1&forceIcon=0"
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"Authorization": authorization})
+    except Exception:
+        raise HTTPException(status_code=502, detail="No se pudo obtener la imagen")
+    if resp.status_code != 200 or not resp.content:
+        raise HTTPException(status_code=404, detail="Sin preview")
+    return Response(
+        content=resp.content,
+        media_type=resp.headers.get("content-type", "image/jpeg"),
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.get("/talk/rooms/{token}/avatar")
