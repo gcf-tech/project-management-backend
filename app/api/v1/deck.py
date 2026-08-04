@@ -31,6 +31,7 @@ from app.api.dependencies import get_db
 from app.db.database import SessionLocal
 from app.core.security import get_nc_user_info
 from app.services.nextcloud_svc import push_nc_notification
+from app.core import i18n
 from app.services.email_svc import send_email, build_notification_email
 from app.core import config
 from app.core.datetime_utils import utc_now
@@ -650,7 +651,8 @@ def _publish_card_event(board_id: Optional[int], card_id: Optional[int], event_t
 
 
 def _log_activity(db: Session, card: DeckCard, actor: Optional[User], event_type: str, *,
-                  payload=None, message=None, extra_recipients=None, notify=True) -> DeckActivity:
+                  payload=None, message=None, extra_recipients=None, notify=True,
+                  notif_key=None, notif_vars=None) -> DeckActivity:
     """Append an immutable activity row and (optionally) fan out notifications
     to followers ∪ assignees ∪ explicit recipients (minus the actor). Only
     stages rows; the caller owns the commit (same transaction discipline as
@@ -681,11 +683,17 @@ def _log_activity(db: Session, card: DeckCard, actor: Optional[User], event_type
         else:
             recipients.discard(actor.id)
 
+    # Mensaje localizado por destinatario (según su user.lang). Si no se pasa una
+    # clave i18n, se usa el `message` tal cual (compatibilidad).
+    langs = {}
+    if notif_key and recipients:
+        langs = dict(db.query(User.id, User.lang).filter(User.id.in_(recipients)).all())
     for uid in recipients:
+        msg = i18n.t(langs.get(uid), notif_key, **(notif_vars or {})) if notif_key else message
         db.add(DeckNotification(
             user_id=uid, actor_id=actor.id if actor else None,
             card_id=card.id, activity_id=act.id,
-            type=ntype, message=message, is_read=False, created_at=utc_now(),
+            type=ntype, message=msg, is_read=False, created_at=utc_now(),
         ))
     return act
 
@@ -720,10 +728,13 @@ async def _dispatch_external(db: Session, authorization: str, activity_id: int) 
             if ok:
                 notif.nc_pushed = True
                 changed = True
-        # (2) Correo (no-reply) — se prepara aquí y se envía en segundo plano.
+        # (2) Correo (no-reply) — se prepara aquí y se envía en segundo plano, en
+        # el idioma preferido del destinatario.
         if recipient.email:
             subject, html, text = build_notification_email(
-                recipient.display_name, notif.type, notif.message or "Tienes una actualización en Deck.", card_title,
+                recipient.display_name, notif.type,
+                notif.message or i18n.t(recipient.lang, "email.fallbackBody"),
+                card_title, lang=recipient.lang,
             )
             emails.append((recipient.email, subject, html, text))
     if changed:
@@ -764,9 +775,34 @@ async def bootstrap(
             "isLeader": ctx.is_leader(),
             "canSeeAnalytics": ctx.can_see_analytics(),
             "teamIds": list(ctx.team_ids),
+            "lang": user.lang or "es",
         },
         "boards": [_serialize_board(b) for b in boards],
     }
+
+
+SUPPORTED_LANGS = ("es", "en")
+
+
+class LanguageIn(BaseModel):
+    lang: str
+
+
+@router.patch("/me/language")
+async def set_my_language(
+    body: LanguageIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Guarda el idioma preferido del usuario (persiste entre dispositivos y lo
+    usarán los correos/notificaciones)."""
+    user = await _get_current_user(authorization, db)
+    lang = (body.lang or "").strip().lower()
+    if lang not in SUPPORTED_LANGS:
+        raise HTTPException(status_code=400, detail="Idioma no soportado")
+    user.lang = lang
+    db.commit()
+    return {"lang": lang}
 
 
 def _visible_boards(db: Session, ctx: DeckContext) -> List[DeckBoard]:
@@ -1457,12 +1493,16 @@ async def patch_card(
         if old_due != card.due_date:
             _log_activity(db, card, user, "due_changed",
                           payload={"to": card.due_date.isoformat() if card.due_date else None},
-                          message=f"{user.display_name} cambió la fecha de vencimiento")
+                          message=f"{user.display_name} cambió la fecha de vencimiento",
+                          notif_key="notif.due_changed",
+                          notif_vars={"actor": user.display_name})
     card.updated_at = utc_now()
     if changed_fields:
         _log_activity(db, card, user, "updated",
                       payload={"fields": changed_fields, "changes": changes},
-                      message=f"{user.display_name} editó: {', '.join(changed_fields)}")
+                      message=f"{user.display_name} editó: {', '.join(changed_fields)}",
+                      notif_key="notif.card_updated",
+                      notif_vars={"actor": user.display_name})
     db.commit()
     db.refresh(card)
     return _serialize_card(card, full=True)
@@ -1500,7 +1540,9 @@ async def move_card(
     if from_col != body.columnId:
         _log_activity(db, card, user, "moved",
                       payload={"from": from_col, "to": body.columnId},
-                      message=f"{user.display_name} moved this card to {target_col.title}")
+                      message=f"{user.display_name} moved this card to {target_col.title}",
+                      notif_key="notif.moved",
+                      notif_vars={"actor": user.display_name, "stage": target_col.title})
     db.commit()
     return {"success": True}
 
@@ -1517,7 +1559,8 @@ async def complete_card(
     _require_perm(db, ctx, card, "complete")
     card.completed_at = utc_now()
     card.updated_at = utc_now()
-    _log_activity(db, card, user, "completed", message=f"{user.display_name} completed this card")
+    _log_activity(db, card, user, "completed", message=f"{user.display_name} completed this card",
+                  notif_key="notif.completed", notif_vars={"actor": user.display_name})
     # Si es una subtarea, avisar a los followers del padre.
     parent_act = None
     if card.parent_card_id:
@@ -1526,6 +1569,7 @@ async def complete_card(
             parent_act = _log_activity(
                 db, parent, user, "updated",
                 message=f"Subtarea completada: “{card.title}” ({card.owner_team.name if card.owner_team else 'equipo'})",
+                notif_key="notif.subtask_done", notif_vars={"title": card.title},
             )
     db.commit()
     if parent_act is not None:
@@ -1677,6 +1721,8 @@ async def add_assignee(
         act = _log_activity(db, card, user, "assigned",
                             payload={"targetUserId": body.userId},
                             message=f"{user.display_name} assigned {target.display_name}",
+                            notif_key="notif.assigned",
+                            notif_vars={"actor": user.display_name, "target": target.display_name},
                             extra_recipients={body.userId})
     db.commit()
     if act is not None:
@@ -1892,6 +1938,7 @@ async def add_comment(
     act = _log_activity(db, card, user, "commented",
                         payload={"commentId": comment.id},
                         message=f"{user.display_name} commented",
+                        notif_key="notif.comment", notif_vars={"actor": user.display_name},
                         extra_recipients=set(body.mentions or []))
     db.commit()
     await _dispatch_external(db, authorization, act.id)
@@ -2340,7 +2387,7 @@ def _ensure_due_soon_notifications(db: Session, user: User) -> None:
             continue
         db.add(DeckNotification(
             user_id=user.id, actor_id=None, card_id=card.id,
-            type="due_soon", message=f"“{card.title}” vence pronto",
+            type="due_soon", message=i18n.t(user.lang, "notif.due_soon", title=card.title),
             is_read=False, created_at=utc_now(),
         ))
         changed = True
@@ -2613,6 +2660,8 @@ async def share_card(
         act = _log_activity(db, card, user, "shared_team",
                             payload={"teamId": body.teamId, "teamName": team.name},
                             message=f"{user.display_name} compartió esta tarjeta con {team.name}",
+                            notif_key="notif.shared",
+                            notif_vars={"actor": user.display_name, "team": team.name},
                             extra_recipients=member_ids)
     db.commit()
     if act is not None:
@@ -3529,8 +3578,10 @@ def _weekly_summaries(db: Session, team_ids: List[int], since, now) -> List[Dict
 
 
 def _weekly_report_email(recipient_name: str, scope_label: str, summaries: List[Dict[str, Any]],
-                         period_label: str = "la última semana"):
-    """(html, text) del reporte, con estilo GCF."""
+                         period_label: str = "la última semana", lang: Optional[str] = "es"):
+    """(html, text) del reporte, con estilo GCF, en el idioma del destinatario."""
+    def T(k, **v):
+        return i18n.t(lang, k, **v)
     url = config.DECK_APP_URL
     rows = ""
     tot = {"completed": 0, "created": 0, "inProgress": 0, "overdue": 0}
@@ -3555,41 +3606,41 @@ def _weekly_report_email(recipient_name: str, scope_label: str, summaries: List[
 <!doctype html><html><body style="margin:0;background:#f4f6fa;padding:24px;font-family:Inter,Arial,sans-serif;">
   <div style="max-width:680px;margin:0 auto;background:#fff;border:1px solid #dde3ec;border-radius:14px;overflow:hidden;">
     <div style="background:#1d2129;padding:16px 22px;color:#fff;font-weight:800;font-size:16px;">
-      <span style="color:#F37022;">Deck</span> · Reporte semanal
+      <span style="color:#F37022;">Deck</span> · {T('report.header')}
     </div>
     <div style="padding:22px;">
-      <p style="margin:0 0 4px;font-size:15px;color:#1c2430;">Hola {recipient_name or ''},</p>
-      <p style="margin:0 0 16px;font-size:14px;color:#5a6473;">Resumen de {period_label} · <b style="color:#1d2129;">{scope_label}</b></p>
+      <p style="margin:0 0 4px;font-size:15px;color:#1c2430;">{T('email.greeting', name=recipient_name or '')}</p>
+      <p style="margin:0 0 16px;font-size:14px;color:#5a6473;">{T('report.summaryOf', period=period_label)} · <b style="color:#1d2129;">{scope_label}</b></p>
       <table style="width:100%;border-collapse:collapse;font-size:13px;color:#1c2430;">
         <thead><tr style="background:#f4f6fa;">
-          <th style="padding:8px 10px;text-align:left;">Equipo</th>
-          <th style="padding:8px 10px;">Compl.</th>
-          <th style="padding:8px 10px;">Nuevas</th>
-          <th style="padding:8px 10px;">En curso</th>
-          <th style="padding:8px 10px;">Vencidas</th>
-          <th style="padding:8px 10px;">Cycle</th>
-          <th style="padding:8px 10px;text-align:left;">Cuello de botella</th>
+          <th style="padding:8px 10px;text-align:left;">{T('report.col.team')}</th>
+          <th style="padding:8px 10px;">{T('report.col.completed')}</th>
+          <th style="padding:8px 10px;">{T('report.col.created')}</th>
+          <th style="padding:8px 10px;">{T('report.col.inProgress')}</th>
+          <th style="padding:8px 10px;">{T('report.col.overdue')}</th>
+          <th style="padding:8px 10px;">{T('report.col.cycle')}</th>
+          <th style="padding:8px 10px;text-align:left;">{T('report.col.bottleneck')}</th>
         </tr></thead>
         <tbody>{rows}</tbody>
       </table>
       <p style="margin:16px 0 0;font-size:13px;color:#5a6473;">
-        Totales: <b style="color:#1f7a44;">{tot['completed']}</b> completadas ·
-        {tot['created']} nuevas · {tot['inProgress']} en curso ·
-        <b style="color:#d64545;">{tot['overdue']}</b> vencidas.
+        {T('report.totals')} <b style="color:#1f7a44;">{tot['completed']}</b> {T('report.completedW')} ·
+        {tot['created']} {T('report.createdW')} · {tot['inProgress']} {T('report.inProgressW')} ·
+        <b style="color:#d64545;">{tot['overdue']}</b> {T('report.overdueW')}.
       </p>
-      <a href="{url}" style="display:inline-block;margin-top:18px;background:#F37022;color:#fff;text-decoration:none;font-weight:700;padding:10px 18px;border-radius:9px;font-size:14px;">Abrir el dashboard</a>
+      <a href="{url}" style="display:inline-block;margin-top:18px;background:#F37022;color:#fff;text-decoration:none;font-weight:700;padding:10px 18px;border-radius:9px;font-size:14px;">{T('report.open')}</a>
     </div>
     <div style="padding:14px 22px;border-top:1px solid #eef1f6;color:#8a93a3;font-size:12px;">
-      Reporte automático de los lunes · no respondas a este correo.
+      {T('report.footer')}
     </div>
   </div>
 </body></html>"""
 
-    lines = [f"Reporte · {scope_label} · {period_label}", ""]
+    lines = [f"{scope_label} · {period_label}", ""]
     for s in summaries:
-        lines.append(f"- {s.get('teamName') or '—'}: {s.get('completed',0)} compl., {s.get('created',0)} nuevas, "
-                     f"{s.get('inProgress',0)} en curso, {s.get('overdue',0)} vencidas.")
-    lines.append(f"\nAbrir el dashboard: {url}")
+        lines.append(T("report.line", team=(s.get('teamName') or '—'), completed=s.get('completed', 0),
+                       created=s.get('created', 0), inProgress=s.get('inProgress', 0), overdue=s.get('overdue', 0)))
+    lines.append(f"\n{T('report.open')}: {url}")
     return html, "\n".join(lines)
 
 
@@ -3611,9 +3662,9 @@ async def send_weekly_reports(db: Session, only_to: Optional[str] = None, dry: b
             continue
         role = _effective_role(u)
         if role == "admin":
-            summaries, scope = all_summaries, "Todos los equipos"
+            summaries, scope = all_summaries, i18n.t(u.lang, "report.scope.all")
         elif role == "leader" and u.team_id and u.team_id in by_team:
-            summaries, scope = [by_team[u.team_id]], (by_team[u.team_id].get("teamName") or "Tu equipo")
+            summaries, scope = [by_team[u.team_id]], (by_team[u.team_id].get("teamName") or "—")
         else:
             continue
         if only_to and u.email != only_to:
@@ -3621,8 +3672,9 @@ async def send_weekly_reports(db: Session, only_to: Optional[str] = None, dry: b
         if dry:
             results.append({"to": u.email, "role": role, "teams": len(summaries)})
             continue
-        html, text = _weekly_report_email(u.display_name, scope, summaries, period_label)
-        ok = await send_email(u.email, f"Reporte de Deck · {period_label}", html, text)
+        plabel = i18n.period_label(range_days, u.lang)
+        html, text = _weekly_report_email(u.display_name, scope, summaries, plabel, lang=u.lang)
+        ok = await send_email(u.email, i18n.t(u.lang, "report.subject", period=plabel), html, text)
         sent += 1 if ok else 0
         results.append({"to": u.email, "role": role, "sent": ok})
     return {"sent": sent, "recipients": results, "dry": dry}
@@ -3782,8 +3834,10 @@ async def admin_send_weekly_report(
         summaries = _weekly_summaries(db, [t.id for t in db.query(Team).all()], now - timedelta(days=range_days), now)
         if dry:
             return {"preview": True, "to": to, "teams": len(summaries)}
-        html, text = _weekly_report_email("", "Todos los equipos", summaries, period)
-        ok = await send_email(to, f"[Prueba] Reporte de Deck · {period}", html, text)
+        plabel = i18n.period_label(range_days, user.lang)
+        html, text = _weekly_report_email("", i18n.t(user.lang, "report.scope.all"), summaries, plabel, lang=user.lang)
+        subject = i18n.t(user.lang, "report.testPrefix") + i18n.t(user.lang, "report.subject", period=plabel)
+        ok = await send_email(to, subject, html, text)
         return {"sent": 1 if ok else 0, "to": to, "test": True}
 
     return await send_weekly_reports(db, dry=dry, range_days=range_days, period_label=period)

@@ -47,6 +47,9 @@ class User(Base):
     #   "member" → sees own team boards + cards shared with their team
     #   NULL     → falls back to users.role ('admin' ⇒ all boards, else member scope)
     deck_role = Column(String(20), nullable=True)
+    # Idioma preferido del usuario para la UI y los mensajes generados (correos,
+    # notificaciones): 'es' | 'en'. NULL → se asume 'es'. Lo maneja cada usuario.
+    lang = Column(String(5), nullable=True)
     # Workspace (oficina virtual) manager flag. Campo MANUAL (como role_commercial/
     # assessment_role/deck_role) — NO se sincroniza desde Nextcloud. Se siembra desde
     # el `perfiles.es_gerente` de Supabase durante la migración (match por email), o se
@@ -1119,6 +1122,7 @@ class WorkspaceNews(Base):
     tipo = Column(String(30), nullable=False, default="nota")  # nota | empresa | cumple | evento
     titulo = Column(String(255), nullable=True)
     cuerpo = Column(Text, nullable=False)
+    imagen_url = Column(String(1000), nullable=True)  # imagen adjunta (enlace público de Nextcloud)
     autor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     fijado = Column(Boolean, default=False, nullable=False, server_default="0")
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)

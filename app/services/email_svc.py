@@ -45,24 +45,19 @@ async def send_email(to: str, subject: str, html: str, text: Optional[str] = Non
         return False
 
 
-# ── Plantilla de correo de notificación de Deck ─────────────────────────────
-
-_SUBJECTS = {
-    "assigned":     "Te asignaron una tarjeta en Deck",
-    "mentioned":    "Te mencionaron en Deck",
-    "comment":      "Nuevo comentario en una tarjeta de Deck",
-    "shared":       "Compartieron una tarjeta con tu equipo",
-    "card_updated": "Actualización en una tarjeta de Deck",
-    "moved":        "Una tarjeta cambió de estado",
-    "due_soon":     "Una tarjeta vence pronto",
-}
-
+# ── Plantilla de correo de notificación de Deck (localizada por idioma) ──────
 
 def build_notification_email(recipient_name: str, ntype: str, message: str,
-                             card_title: Optional[str]) -> tuple[str, str, str]:
-    """Devuelve (subject, html, text) para una notificación de Deck."""
-    subject = _SUBJECTS.get(ntype, "Notificación de Deck")
-    card_line = f'<p style="margin:0 0 6px;color:#5a6473;font-size:14px;">Tarjeta: <b style="color:#1d2129;">{card_title}</b></p>' if card_title else ""
+                             card_title: Optional[str], lang: Optional[str] = "es") -> tuple[str, str, str]:
+    """Devuelve (subject, html, text) para una notificación de Deck, en el idioma
+    del destinatario (`lang`)."""
+    from app.core import i18n  # import perezoso para evitar ciclos
+    subject = i18n.t(lang, f"email.subject.{ntype}") if i18n.t(lang, f"email.subject.{ntype}") != f"email.subject.{ntype}" else i18n.t(lang, "email.subject.default")
+    greeting = i18n.t(lang, "email.greeting", name=recipient_name or "")
+    card_label = i18n.t(lang, "email.cardLabel")
+    open_txt = i18n.t(lang, "email.open")
+    footer = i18n.t(lang, "email.footer")
+    card_line = f'<p style="margin:0 0 6px;color:#5a6473;font-size:14px;">{card_label} <b style="color:#1d2129;">{card_title}</b></p>' if card_title else ""
     url = config.DECK_APP_URL
     html = f"""\
 <!doctype html><html><body style="margin:0;background:#f4f6fa;padding:24px;font-family:Inter,Arial,sans-serif;">
@@ -71,15 +66,15 @@ def build_notification_email(recipient_name: str, ntype: str, message: str,
       <span style="color:#F37022;">Deck</span> · GCF
     </div>
     <div style="padding:22px;">
-      <p style="margin:0 0 10px;font-size:15px;color:#1c2430;">Hola {recipient_name or ''},</p>
+      <p style="margin:0 0 10px;font-size:15px;color:#1c2430;">{greeting}</p>
       <p style="margin:0 0 12px;font-size:15px;color:#1c2430;">{message}</p>
       {card_line}
-      <a href="{url}" style="display:inline-block;margin-top:14px;background:#F37022;color:#fff;text-decoration:none;font-weight:700;padding:10px 18px;border-radius:9px;font-size:14px;">Abrir en Deck</a>
+      <a href="{url}" style="display:inline-block;margin-top:14px;background:#F37022;color:#fff;text-decoration:none;font-weight:700;padding:10px 18px;border-radius:9px;font-size:14px;">{open_txt}</a>
     </div>
     <div style="padding:14px 22px;border-top:1px solid #eef1f6;color:#8a93a3;font-size:12px;">
-      Notificación automática · no respondas a este correo.
+      {footer}
     </div>
   </div>
 </body></html>"""
-    text = f"{message}\n" + (f"Tarjeta: {card_title}\n" if card_title else "") + f"\nAbrir en Deck: {url}\n\nNotificación automática, no respondas a este correo."
+    text = f"{message}\n" + (f"{card_label} {card_title}\n" if card_title else "") + f"\n{open_txt}: {url}\n\n{footer}"
     return subject, html, text

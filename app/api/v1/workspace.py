@@ -994,9 +994,10 @@ async def talk_avatar(token: str, authorization: Annotated[str, Header()]):
 # ============================================================
 
 class NewsIn(BaseModel):
-    cuerpo: str
+    cuerpo: str = ""
     titulo: Optional[str] = None
     tipo: Optional[str] = "nota"  # nota | empresa | cumple | evento
+    imagen_url: Optional[str] = None
 
 
 _NEWS_TIPOS = {"nota", "empresa", "cumple", "evento"}
@@ -1009,6 +1010,7 @@ def _news_dict(n: WorkspaceNews) -> dict:
         "tipo": n.tipo,
         "titulo": n.titulo,
         "cuerpo": n.cuerpo,
+        "imagen_url": n.imagen_url,
         "fijado": bool(n.fijado),
         "created_at": to_rfc3339_z(n.created_at),
         "autor_id": n.autor_id,
@@ -1044,8 +1046,12 @@ async def crear_news(
     """Publica una novedad (nota de colaborador). El autor es el usuario del token."""
     user = await _resolve_user(authorization, db)
     cuerpo = (body.cuerpo or "").strip()
-    if not cuerpo:
-        raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío")
+    imagen_url = (body.imagen_url or "").strip() or None
+    if not cuerpo and not imagen_url:
+        raise HTTPException(status_code=400, detail="La novedad no puede estar vacía")
+    # solo aceptamos URLs de imagen de nuestro propio Nextcloud (evita inyectar enlaces externos)
+    if imagen_url and not imagen_url.startswith(NC_URL):
+        imagen_url = None
     tipo = (body.tipo or "nota").strip().lower()
     if tipo not in _NEWS_TIPOS:
         tipo = "nota"
@@ -1056,6 +1062,7 @@ async def crear_news(
         tipo=tipo,
         titulo=(body.titulo or "").strip() or None,
         cuerpo=cuerpo[:4000],
+        imagen_url=imagen_url,
         autor_id=user.id,
         created_at=utc_now(),
     )
@@ -1063,6 +1070,51 @@ async def crear_news(
     db.commit()
     db.refresh(n)
     return _news_dict(n)
+
+
+@router.post("/news/upload")
+async def news_upload(authorization: Annotated[str, Header()], file: UploadFile = File(...)):
+    """Sube una imagen para una novedad: la guarda en Nextcloud (carpeta Workspace-News)
+    con enlace público y devuelve la URL de descarga directa (para usar en <img>)."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Archivo vacío")
+    if len(content) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Imagen muy grande (máx 8 MB)")
+    ctype = file.content_type or ""
+    if not ctype.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Solo se permiten imágenes")
+    nc = await get_nc_user_info(authorization)
+    uid = nc["id"]
+    fname = _safe_name(file.filename or "imagen.png")
+    remote_name = f"{utc_now().strftime('%Y%m%d%H%M%S')}-{fname}"
+    folder = "Workspace-News"
+    dav_base = f"{NC_URL}/remote.php/dav/files/{urllib.parse.quote(uid)}"
+    put_url = f"{dav_base}/{folder}/{urllib.parse.quote(remote_name)}"
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        try:
+            await client.request("MKCOL", f"{dav_base}/{folder}/", headers={"Authorization": authorization})
+        except Exception:
+            pass
+        put = await client.put(
+            put_url,
+            headers={"Authorization": authorization, "Content-Type": ctype},
+            content=content,
+        )
+        if put.status_code not in (200, 201, 204):
+            raise HTTPException(status_code=502, detail=f"No se pudo subir la imagen (dav {put.status_code})")
+        # enlace público (shareType=3), solo lectura (permissions=1)
+        share = await client.post(
+            f"{NC_URL}/ocs/v2.php/apps/files_sharing/api/v1/shares",
+            headers={"Authorization": authorization, "OCS-APIRequest": "true", "Accept": "application/json"},
+            data={"path": f"{folder}/{remote_name}", "shareType": 3, "permissions": 1},
+        )
+        if share.status_code not in (200, 201):
+            raise HTTPException(status_code=502, detail=f"No se pudo compartir la imagen ({share.status_code})")
+        token = (((share.json().get("ocs") or {}).get("data") or {}).get("token"))
+        if not token:
+            raise HTTPException(status_code=502, detail="Enlace de imagen sin token")
+    return {"url": f"{NC_URL}/s/{token}/download"}
 
 
 @router.delete("/news/{news_id}")
