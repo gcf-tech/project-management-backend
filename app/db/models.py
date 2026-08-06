@@ -50,6 +50,9 @@ class User(Base):
     # Idioma preferido del usuario para la UI y los mensajes generados (correos,
     # notificaciones): 'es' | 'en'. NULL → se asume 'es'. Lo maneja cada usuario.
     lang = Column(String(5), nullable=True)
+    # Notificaciones por correo (Deck). True = campana + correo; False = solo campana.
+    # La app (in-app) siempre notifica. Default ambas. Lo configura el admin por usuario.
+    notify_email = Column(Boolean, default=True, nullable=False, server_default="1")
     # Workspace (oficina virtual) manager flag. Campo MANUAL (como role_commercial/
     # assessment_role/deck_role) — NO se sincroniza desde Nextcloud. Se siembra desde
     # el `perfiles.es_gerente` de Supabase durante la migración (match por email), o se

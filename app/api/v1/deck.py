@@ -728,9 +728,9 @@ async def _dispatch_external(db: Session, authorization: str, activity_id: int) 
             if ok:
                 notif.nc_pushed = True
                 changed = True
-        # (2) Correo (no-reply) — se prepara aquí y se envía en segundo plano, en
-        # el idioma preferido del destinatario.
-        if recipient.email:
+        # (2) Correo (no-reply) — solo si el usuario tiene activadas las notis por
+        # correo (default True). Se envía en segundo plano, en su idioma.
+        if recipient.email and recipient.notify_email:
             subject, html, text = build_notification_email(
                 recipient.display_name, notif.type,
                 notif.message or i18n.t(recipient.lang, "email.fallbackBody"),
@@ -2709,6 +2709,7 @@ class AdminUserPatch(BaseModel):
     deckRole: Optional[str] = None     # "admin" | "leader" | "member" | "" (reset)
     teamId: Optional[int] = None
     clearTeam: bool = False            # poner team_id a NULL explícitamente
+    notifyEmail: Optional[bool] = None # notificaciones por correo on/off
 
 
 class TeamCreate(BaseModel):
@@ -2743,7 +2744,7 @@ async def admin_list_users(
         out.append({
             "userId": u.id, "ncUserId": u.nc_user_id, "displayName": u.display_name,
             "email": u.email, "teamId": u.team_id, "teamName": names.get(u.team_id),
-            "deckRole": u.deck_role, "effectiveRole": eff,
+            "deckRole": u.deck_role, "effectiveRole": eff, "notifyEmail": bool(u.notify_email),
         })
     return {"users": out}
 
@@ -2778,6 +2779,9 @@ async def admin_patch_user(
             raise HTTPException(status_code=404, detail="Equipo no encontrado")
         target.team_id = body.teamId
 
+    if body.notifyEmail is not None:
+        target.notify_email = bool(body.notifyEmail)
+
     db.commit()
     db.refresh(target)
     names = _team_name_map(db)
@@ -2787,6 +2791,7 @@ async def admin_patch_user(
     return {
         "userId": target.id, "displayName": target.display_name, "teamId": target.team_id,
         "teamName": names.get(target.team_id), "deckRole": target.deck_role, "effectiveRole": eff,
+        "notifyEmail": bool(target.notify_email),
     }
 
 
