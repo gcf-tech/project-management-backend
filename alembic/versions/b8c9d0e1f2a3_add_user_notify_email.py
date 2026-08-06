@@ -15,9 +15,20 @@ branch_labels = None
 depends_on = None
 
 
+def _has_col(bind, table, col):
+    insp = sa.inspect(bind)
+    return any(c['name'] == col for c in insp.get_columns(table))
+
+
 def upgrade():
-    op.add_column('users', sa.Column('notify_email', sa.Boolean(), nullable=False, server_default='1'))
+    bind = op.get_bind()
+    # Idempotente: en prod la columna pudo agregarse por SQL directo (alembic
+    # quedó desincronizado con la cadena desplegada).
+    if not _has_col(bind, 'users', 'notify_email'):
+        op.add_column('users', sa.Column('notify_email', sa.Boolean(), nullable=False, server_default='1'))
 
 
 def downgrade():
-    op.drop_column('users', 'notify_email')
+    bind = op.get_bind()
+    if _has_col(bind, 'users', 'notify_email'):
+        op.drop_column('users', 'notify_email')
