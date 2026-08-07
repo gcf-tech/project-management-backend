@@ -50,6 +50,9 @@ class User(Base):
     # Idioma preferido del usuario para la UI y los mensajes generados (correos,
     # notificaciones): 'es' | 'en'. NULL → se asume 'es'. Lo maneja cada usuario.
     lang = Column(String(5), nullable=True)
+    # Notificaciones por correo (Deck). True = campana + correo; False = solo campana.
+    # La app (in-app) siempre notifica. Default ambas. Lo configura el admin por usuario.
+    notify_email = Column(Boolean, default=True, nullable=False, server_default="1")
     # Workspace (oficina virtual) manager flag. Campo MANUAL (como role_commercial/
     # assessment_role/deck_role) — NO se sincroniza desde Nextcloud. Se siembra desde
     # el `perfiles.es_gerente` de Supabase durante la migración (match por email), o se
@@ -1131,4 +1134,30 @@ class WorkspaceNews(Base):
 
     __table_args__ = (
         Index("idx_workspace_news_created", "created_at"),
+    )
+
+# ── Pegar al final de app/db/models.py ──────────────────────────────────────
+# (Base, utc_now, Column, Integer, String, DECIMAL, Boolean, Text, DateTime e
+#  Index ya están importados en ese archivo — no hace falta añadir imports.)
+
+class Portafolio(Base):
+    """Portafolios de inversión para la herramienta interna de consulta del
+    equipo comercial. Herramienta de solo-lectura para el asesor; la edición
+    la hacen las dos personas del equipo. La vigencia se controla con
+    `updated_at` (onupdate=utc_now): se refresca sola en cada edición."""
+    __tablename__ = "portafolios"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    nombre = Column(String(100), nullable=False, unique=True)
+    monto_minimo = Column(DECIMAL(14, 2), nullable=False)
+    rendimiento_anual = Column(DECIMAL(5, 2), nullable=False)   # en %
+    nivel_riesgo = Column(DECIMAL(5, 2), nullable=False)        # en %
+    orden = Column(Integer, nullable=False, default=0, server_default="0")
+    activo = Column(Boolean, nullable=False, default=True, server_default="1")
+    notas = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        Index("idx_portafolios_orden", "activo", "orden"),
     )
