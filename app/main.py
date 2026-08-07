@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
-from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router, calendar, reports, commercial, assessment, deck, workspace
+from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router, calendar, reports, commercial, assessment, deck, workspace, portafolios
 
 
 @asynccontextmanager
@@ -33,6 +33,7 @@ app.add_middleware(
         "https://deck.gcf.group", # deck prod
         "http://localhost:3000",  # workspace (habbo) dev — servido por su Express
         "https://workspace.gcf.group",  # workspace prod (definir dominio real)
+        "https://portfolios.gcf.group",  # portafolio prod (definir dominio real)
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -55,7 +56,7 @@ app.include_router(commercial.router,   prefix="/api/commercial")
 app.include_router(assessment.router,   prefix="/api/assessment")
 app.include_router(deck.router,         prefix="/api/decks")  # /api/deck is a legacy NC-proxy in teams.py
 app.include_router(workspace.router,    prefix="/api/workspace")
-
+app.include_router(portafolios.router,   prefix="/api/portafolios")
 
 @app.get("/health")
 async def root_health():
