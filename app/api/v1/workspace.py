@@ -924,6 +924,8 @@ async def talk_messages(token: str, authorization: Annotated[str, Header()], las
             "actorName": m.get("actorDisplayName"),
             "message": text,
             "file": file_info,
+            "reactions": m.get("reactions") or {},          # {emoji: conteo}
+            "reactionsSelf": m.get("reactionsSelf") or [],  # emojis que YO puse
             "timestamp": m.get("timestamp"),
         })
     msgs.sort(key=lambda x: x["id"] or 0)  # id monotónico → orden cronológico
@@ -935,6 +937,30 @@ async def talk_send(token: str, body: MensajeTalkIn, authorization: Annotated[st
     """Envía un mensaje a una conversación."""
     data = await _talk("POST", f"/api/v1/chat/{token}", authorization, data={"message": body.message})
     return {"id": (data or {}).get("id")}
+
+
+class ReaccionIn(BaseModel):
+    reaction: str
+
+
+@router.post("/talk/rooms/{token}/messages/{message_id}/reaction")
+async def talk_react(token: str, message_id: int, body: ReaccionIn, authorization: Annotated[str, Header()]):
+    """Agrega una reacción (emoji) a un mensaje de Talk."""
+    emoji = (body.reaction or "").strip()
+    if not emoji:
+        raise HTTPException(status_code=400, detail="Reacción vacía")
+    await _talk("POST", f"/api/v1/reaction/{token}/{message_id}", authorization, data={"reaction": emoji})
+    return {"ok": True}
+
+
+@router.delete("/talk/rooms/{token}/messages/{message_id}/reaction")
+async def talk_unreact(token: str, message_id: int, reaction: str, authorization: Annotated[str, Header()]):
+    """Quita una reacción (emoji) que YO puse en un mensaje de Talk."""
+    emoji = (reaction or "").strip()
+    if not emoji:
+        raise HTTPException(status_code=400, detail="Reacción vacía")
+    await _talk("DELETE", f"/api/v1/reaction/{token}/{message_id}", authorization, params={"reaction": emoji})
+    return {"ok": True}
 
 
 def _safe_name(name: Optional[str]) -> str:
