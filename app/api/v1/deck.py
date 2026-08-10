@@ -126,11 +126,15 @@ class CardIn(BaseModel):
     clientOpId: Optional[str] = None
 
 
+CARD_STATUSES = ("not_started", "in_progress", "paused", "done", "cancelled")
+
+
 class CardPatch(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     projectId: Optional[int] = None
     priority: Optional[str] = None
+    status: Optional[str] = None
     startDate: Optional[str] = None
     dueDate: Optional[str] = None
     prototypeUrl: Optional[str] = None
@@ -451,6 +455,7 @@ def _serialize_card(card: DeckCard, *, full=False, sub=None) -> Dict[str, Any]:
         "listOrder": card.list_order,
         "position": card.position,
         "priority": card.priority,
+        "status": card.status or "not_started",
         "startDate": card.start_date.isoformat() if card.start_date else None,
         "dueDate": card.due_date.isoformat() if card.due_date else None,
         "completedAt": card.completed_at.isoformat() if card.completed_at else None,
@@ -513,12 +518,14 @@ def _subtask_rollup(db: Session, card_ids: List[int]) -> Dict[int, Dict[str, int
 
 
 def _serialize_attachment(a: DeckAttachment) -> Dict[str, Any]:
+    ct = a.content_type or ""
     return {
         "id": a.id,
         "filename": a.filename,
         "contentType": a.content_type,
         "size": a.size,
-        "isImage": bool(a.content_type and a.content_type.startswith("image/")),
+        "isImage": ct.startswith("image/"),
+        "isPdf": ct == "application/pdf" or (a.filename or "").lower().endswith(".pdf"),
         "url": f"/api/decks/attachments/{a.id}",
     }
 
@@ -1496,6 +1503,25 @@ async def patch_card(
                           message=f"{user.display_name} cambió la fecha de vencimiento",
                           notif_key="notif.due_changed",
                           notif_vars={"actor": user.display_name})
+    if body.status is not None and body.status != (card.status or "not_started"):
+        if body.status not in CARD_STATUSES:
+            raise HTTPException(status_code=400, detail="Estado inválido")
+        _gate("move")
+        old_status = card.status or "not_started"
+        card.status = body.status
+        # Integración con "completar": 'done' ↔ completed_at.
+        if body.status == "done" and not card.completed_at:
+            card.completed_at = utc_now()
+            _log_activity(db, card, user, "completed",
+                          message=f"{user.display_name} completed this card",
+                          notif_key="notif.completed", notif_vars={"actor": user.display_name})
+        elif old_status == "done" and body.status != "done" and card.completed_at:
+            card.completed_at = None
+            _log_activity(db, card, user, "reopened",
+                          message=f"{user.display_name} reopened this card", notify=False)
+        else:
+            changes["status"] = {"from": old_status, "to": body.status}
+            changed_fields.append("estado")
     card.updated_at = utc_now()
     if changed_fields:
         _log_activity(db, card, user, "updated",
@@ -1558,6 +1584,7 @@ async def complete_card(
     card = _get_card_or_404(db, card_id)
     _require_perm(db, ctx, card, "complete")
     card.completed_at = utc_now()
+    card.status = "done"
     card.updated_at = utc_now()
     _log_activity(db, card, user, "completed", message=f"{user.display_name} completed this card",
                   notif_key="notif.completed", notif_vars={"actor": user.display_name})
@@ -1590,6 +1617,8 @@ async def reopen_card(
     card = _get_card_or_404(db, card_id)
     _require_perm(db, ctx, card, "complete")
     card.completed_at = None
+    if card.status == "done":
+        card.status = "in_progress"
     card.updated_at = utc_now()
     _log_activity(db, card, user, "reopened", message=f"{user.display_name} reopened this card", notify=False)
     db.commit()
@@ -2062,6 +2091,67 @@ async def upload_attachment(
     db.commit()
     db.refresh(att)
     return _serialize_attachment(att)
+
+
+_URL_RE = re.compile(r'https?://[^\s"\'<>)\]]+', re.IGNORECASE)
+
+
+def _extract_links(text: Optional[str]):
+    """URLs http(s) de un texto (HTML o plano)."""
+    if not text:
+        return []
+    # quitar tags para no capturar atributos rotos, pero conservar href/src
+    plain = re.sub(r'<[^>]+>', ' ', text)
+    urls = _URL_RE.findall(plain)
+    # limpiar signos de puntuación finales comunes
+    return [u.rstrip('.,;:)') for u in urls]
+
+
+@router.get("/cards/{card_id}/attachments")
+async def list_card_attachments(
+    card_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Todos los adjuntos de una card en un solo lugar: archivos (de la descripción
+    y de los comentarios) + links (URLs en la descripción/comentarios)."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    card = _get_card_or_404(db, card_id)
+    _require_see_card(ctx, card)
+
+    atts = db.query(DeckAttachment).filter(DeckAttachment.card_id == card_id)\
+        .order_by(DeckAttachment.created_at.desc()).all()
+    files = []
+    for a in atts:
+        d = _serialize_attachment(a)
+        d["uploadedBy"] = _user_brief(a.uploader) if a.uploader else None
+        d["commentId"] = a.comment_id           # None = viene de la descripción
+        d["createdAt"] = a.created_at.isoformat() if a.created_at else None
+        files.append(d)
+
+    # Links de la descripción + comentarios (dedup, conservando el primer origen).
+    comments = db.query(DeckComment).filter(
+        and_(DeckComment.card_id == card_id, DeckComment.deleted_at.is_(None))
+    ).all()
+    seen = set()
+    links = []
+
+    def _add_links(urls, source, comment_id=None, author=None):
+        for u in urls:
+            if u in seen:
+                continue
+            seen.add(u)
+            links.append({"url": u, "source": source, "commentId": comment_id,
+                          "author": _user_brief(author) if author else None})
+
+    _add_links(_extract_links(card.description), "description")
+    if card.prototype_url:
+        _add_links([card.prototype_url], "prototype")
+    for c in comments:
+        _add_links(_extract_links(c.body), "comment", c.id, c.user)
+
+    return {"files": files, "links": links}
 
 
 @router.get("/attachments/{attachment_id}")
@@ -3415,7 +3505,7 @@ async def analytics_overview(
 
     risk_cards = []
     for c in cards:
-        if c.completed_at or not c.due_date:
+        if c.completed_at or not c.due_date or c.status == "cancelled":
             continue
         # Excluir del pronóstico las tareas en la PRIMERA etapa (creación: aún no
         # empiezan → no tiene sentido decir que se atrasarán) y en la ÚLTIMA

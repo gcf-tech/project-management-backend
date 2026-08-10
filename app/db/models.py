@@ -630,6 +630,10 @@ class DeckCard(Base):
     due_date = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     archived = Column(Boolean, default=False)
+    # Estado de la tarea (independiente de la etapa/columna, que es del flujo del
+    # área). Set FIJO global: not_started | in_progress | paused | done | cancelled.
+    # Integrado: 'done' ↔ completed_at; 'cancelled' la saca de "en curso"/riesgo.
+    status = Column(String(20), nullable=False, default="not_started", server_default="not_started")
 
     prototype_url = Column(String(500), nullable=True)  # link al prototipo (etapa Prototipado)
 
