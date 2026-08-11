@@ -830,6 +830,7 @@ _TALK = f"{NC_URL}/ocs/v2.php/apps/spreed"
 
 class MensajeTalkIn(BaseModel):
     message: str
+    replyTo: Optional[int] = None
 
 
 class OneToOneIn(BaseModel):
@@ -918,12 +919,26 @@ async def talk_messages(token: str, authorization: Annotated[str, Header()], las
                 "link": f.get("link"),
             }
             text = f"📎 {f['name']}"  # fallback textual
+        parent = None
+        par = m.get("parent")
+        if isinstance(par, dict) and par.get("id"):
+            ptext = par.get("message")
+            pparams = par.get("messageParameters") or {}
+            pf = pparams.get("file") if isinstance(pparams, dict) else None
+            if isinstance(pf, dict) and pf.get("name"):
+                ptext = f"📎 {pf['name']}"
+            parent = {
+                "id": par.get("id"),
+                "message": ptext,
+                "actorName": par.get("actorDisplayName"),
+            }
         msgs.append({
             "id": m.get("id"),
             "actorId": m.get("actorId"),
             "actorName": m.get("actorDisplayName"),
             "message": text,
             "file": file_info,
+            "parent": parent,                                # mensaje al que responde (si aplica)
             "reactions": m.get("reactions") or {},          # {emoji: conteo}
             "reactionsSelf": m.get("reactionsSelf") or [],  # emojis que YO puse
             "timestamp": m.get("timestamp"),
@@ -934,9 +949,12 @@ async def talk_messages(token: str, authorization: Annotated[str, Header()], las
 
 @router.post("/talk/rooms/{token}/messages")
 async def talk_send(token: str, body: MensajeTalkIn, authorization: Annotated[str, Header()]):
-    """Envía un mensaje a una conversación."""
-    data = await _talk("POST", f"/api/v1/chat/{token}", authorization, data={"message": body.message})
-    return {"id": (data or {}).get("id")}
+    """Envía un mensaje a una conversación (opcionalmente como respuesta a otro)."""
+    data = {"message": body.message}
+    if body.replyTo:
+        data["replyTo"] = body.replyTo
+    resp = await _talk("POST", f"/api/v1/chat/{token}", authorization, data=data)
+    return {"id": (resp or {}).get("id")}
 
 
 class ReaccionIn(BaseModel):
