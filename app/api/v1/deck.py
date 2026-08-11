@@ -1563,6 +1563,13 @@ async def move_card(
         c.position = pos
         c.updated_at = utc_now()
 
+    # Al salir de la PRIMERA etapa (empezarla), si seguía 'not_started' → 'in_progress'.
+    if from_col != body.columnId and card.status == "not_started":
+        first_pos = db.query(func.min(DeckColumn.position)).filter(
+            DeckColumn.board_id == card.board_id).scalar()
+        if target_col.position != first_pos:
+            card.status = "in_progress"
+
     if from_col != body.columnId:
         _log_activity(db, card, user, "moved",
                       payload={"from": from_col, "to": body.columnId},
