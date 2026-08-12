@@ -871,8 +871,10 @@ async def talk_rooms(authorization: Annotated[str, Header()]):
             "unread": r.get("unreadMessages", 0),
             "lastActivity": r.get("lastActivity"),
             "lastMessage": (lm or {}).get("message") if isinstance(lm, dict) else None,
+            "isFavorite": bool(r.get("isFavorite")),  # marcada como favorita en Talk
         })
-    rooms.sort(key=lambda x: x.get("lastActivity") or 0, reverse=True)
+    # favoritas primero, luego por actividad reciente
+    rooms.sort(key=lambda x: (x.get("isFavorite"), x.get("lastActivity") or 0), reverse=True)
     return rooms
 
 
@@ -945,6 +947,19 @@ async def talk_messages(token: str, authorization: Annotated[str, Header()], las
         })
     msgs.sort(key=lambda x: x["id"] or 0)  # id monotónico → orden cronológico
     return msgs
+
+
+@router.get("/talk/rooms/{token}/read-status")
+async def talk_read_status(token: str, authorization: Annotated[str, Header()]):
+    """Estado de lectura de la conversación:
+    - lastCommonRead: último mensaje leído por TODOS (para marcar mis mensajes como ✓✓).
+    - lastRead: último mensaje que YO he leído."""
+    data = await _talk("GET", f"/api/v4/room/{token}", authorization)
+    d = data or {}
+    return {
+        "lastCommonRead": d.get("lastCommonReadMessage") or 0,
+        "lastRead": d.get("lastReadMessage") or 0,
+    }
 
 
 @router.post("/talk/rooms/{token}/messages")
