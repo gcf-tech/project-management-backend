@@ -862,6 +862,9 @@ class DeckNotification(Base):
     type = Column(Enum(
         "assigned", "mentioned", "comment", "card_updated",
         "due_soon", "moved", "shared",
+        # Recordatorios del asistente por voz: reusan la campana del workspace
+        # (sin cardId, icono por defecto) en vez de tener canal propio.
+        "assistant_reminder",
     ), nullable=False)
     message = Column(String(500), nullable=True)
     is_read = Column(Boolean, default=False)
@@ -1164,4 +1167,77 @@ class Portafolio(Base):
 
     __table_args__ = (
         Index("idx_portafolios_orden", "activo", "orden"),
+    )
+
+
+# ============================================================
+# WORKSPACE ASSISTANT (asistente por voz) MODELS
+# Las tres tablas guardan en UTC; la conversión a Bogotá es de presentación.
+# ============================================================
+
+class WorkspaceAssistantNote(Base):
+    """Notas dictadas al asistente. `origen` distingue transcripción de texto
+    escrito a mano: la dictada puede arrastrar errores de transcripción."""
+    __tablename__ = "workspace_assistant_notes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    titulo = Column(String(255), nullable=False)
+    cuerpo = Column(Text, nullable=False)
+    origen = Column(Enum("voz", "texto"), nullable=False, default="voz", server_default="voz")
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    usuario = relationship("User", foreign_keys=[usuario_id])
+
+    __table_args__ = (
+        Index("idx_ws_asst_notes_usuario", "usuario_id", "created_at"),
+    )
+
+
+class WorkspaceAssistantReminder(Base):
+    """Recordatorios creados por el asistente. Los barre el scheduler del
+    backend (no el Express, cuyo estado es volátil) cada 60 s."""
+    __tablename__ = "workspace_assistant_reminders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    texto = Column(String(500), nullable=False)
+    vence_en = Column(DateTime(timezone=True), nullable=False)   # SIEMPRE UTC
+    estado = Column(
+        Enum("pendiente", "notificado", "cancelado"),
+        nullable=False, default="pendiente", server_default="pendiente",
+    )
+    notificado_en = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    usuario = relationship("User", foreign_keys=[usuario_id])
+
+    __table_args__ = (
+        # El scheduler consulta por (estado, vence_en) cada minuto.
+        Index("idx_ws_asst_rem_estado_vence", "estado", "vence_en"),
+        Index("idx_ws_asst_rem_usuario", "usuario_id", "estado"),
+    )
+
+
+class WorkspaceAssistantLog(Base):
+    """Auditoría de lo que hizo el asistente (no es debug). Guarda la
+    `transcripcion` original junto a los `argumentos` interpretados: la
+    diferencia entre ambos delata que el modelo entendió mal. Se escribe
+    siempre: acción exitosa, fallida y también simulada."""
+    __tablename__ = "workspace_assistant_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    accion = Column(String(60), nullable=False)
+    argumentos = Column(JSON, nullable=True)
+    resultado = Column(Enum("ok", "error"), nullable=False)
+    detalle = Column(Text, nullable=True)          # motivo del error, o id de lo creado
+    transcripcion = Column(Text, nullable=True)    # el texto original que originó la acción
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    usuario = relationship("User", foreign_keys=[usuario_id])
+
+    __table_args__ = (
+        Index("idx_ws_asst_log_usuario", "usuario_id", "created_at"),
     )
