@@ -95,3 +95,8 @@ SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "GCF Deck")
 DECK_APP_URL = os.getenv("DECK_APP_URL", "https://deck.gcf.group/app/")
 # El email se envía solo si hay credenciales configuradas.
 EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASSWORD)
+
+# Google Cloud Translation API (v2, con API key). Para el botón "Traducir" de los
+# comentarios. Crear una API key en GCP restringida a "Cloud Translation API".
+GOOGLE_TRANSLATE_API_KEY = os.getenv("GOOGLE_TRANSLATE_API_KEY", "")
+TRANSLATE_ENABLED = bool(GOOGLE_TRANSLATE_API_KEY)
