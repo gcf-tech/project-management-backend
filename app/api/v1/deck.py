@@ -795,6 +795,30 @@ class LanguageIn(BaseModel):
     lang: str
 
 
+class TranslateIn(BaseModel):
+    text: str
+    targetLang: Optional[str] = None       # por defecto el idioma del usuario
+    format: Optional[str] = None           # 'html' | 'text'
+
+
+@router.post("/translate")
+async def translate_text(
+    body: TranslateIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Traduce un texto (p. ej. un comentario) al idioma del usuario. Best-effort:
+    si el proveedor está deshabilitado devuelve enabled=false."""
+    user = await _get_current_user(authorization, db)
+    from app.services import translate_svc
+    target = (body.targetLang or user.lang or "es")
+    res = await translate_svc.translate(body.text or "", target, fmt=body.format or "text")
+    if res is None:
+        from app.core import config as _cfg
+        return {"enabled": _cfg.TRANSLATE_ENABLED, "text": None, "detected": None}
+    return {"enabled": True, "text": res["text"], "detected": res["detected"], "target": target.split("-")[0].lower()}
+
+
 @router.patch("/me/language")
 async def set_my_language(
     body: LanguageIn,
