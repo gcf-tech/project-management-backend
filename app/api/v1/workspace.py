@@ -1077,6 +1077,57 @@ async def talk_avatar(token: str, authorization: Annotated[str, Header()]):
 
 
 # ============================================================
+# PRESENCIA DE NEXTCLOUD — quién está conectado en NC (Talk/Calendar/etc.)
+#  Sirve para mostrar su "presencia fantasma" en el mundo del workspace.
+# ============================================================
+
+@router.get("/nextcloud-online")
+async def nextcloud_online(authorization: Annotated[str, Header()], db: Session = Depends(get_db)):
+    """Usuarios del workspace conectados en Nextcloud (según la User Status API).
+    status ∈ {online, away, dnd} se considera 'presente'. Incluye departamento y
+    avatar para pintar su muñequito fantasma."""
+    await _resolve_user(authorization, db)  # requiere sesión válida
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                f"{NC_URL}/ocs/v2.php/apps/user_status/api/v1/statuses",
+                headers={"Authorization": authorization, "OCS-APIRequest": "true", "Accept": "application/json"},
+                params={"limit": 200},
+            )
+    except Exception:
+        return []
+    if resp.status_code != 200:
+        return []
+    try:
+        data = (resp.json().get("ocs") or {}).get("data") or []
+    except Exception:
+        return []
+    estado = {}
+    for s in data:
+        uid = s.get("userId")
+        if uid:
+            estado[uid] = (s.get("status") or "").lower()
+    presentes = {"online", "away", "dnd"}
+    users = db.query(User).filter(User.is_active.is_(True)).all()
+    profs = {p.user_id: p for p in db.query(WorkspaceProfile).all()}
+    out = []
+    for u in users:
+        st = estado.get(u.nc_user_id)
+        if st in presentes:
+            prof = profs.get(u.id)
+            out.append({
+                "id": u.id,
+                "ncid": u.nc_user_id,
+                "name": u.display_name,
+                "role": u.job_title,
+                "status": st,
+                "departamento": (prof.departamento if prof else None),
+                "avatar": (prof.avatar if prof else None),
+            })
+    return out
+
+
+# ============================================================
 # NEWS — tablero de novedades del Holding
 #  Notas de colaboradores, avisos empresariales, cumpleaños, etc.
 # ============================================================
