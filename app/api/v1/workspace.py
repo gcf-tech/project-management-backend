@@ -1121,7 +1121,8 @@ async def nextcloud_online(authorization: Annotated[str, Header()], db: Session 
                 "name": u.display_name,
                 "role": u.job_title,
                 "status": st,
-                "departamento": (prof.departamento if prof else None),
+                "team": (u.team.name if u.team else None),        # equipo del Deck (fuente fiable)
+                "departamento": (prof.departamento if prof else None),  # onboarding workspace (opcional)
                 "avatar": (prof.avatar if prof else None),
             })
     return out
