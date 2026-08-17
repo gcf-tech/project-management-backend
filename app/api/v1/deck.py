@@ -262,7 +262,10 @@ class DeckContext:
             return True
         if card.owner_team_id in self.team_ids:
             return True
-        return any(st.team_id in self.team_ids for st in card.shared_teams)
+        if any(st.team_id in self.team_ids for st in card.shared_teams):
+            return True
+        # Soy follower de la card (aunque sea de otro tablero): puedo verla.
+        return any(f.user_id == self.user.id for f in card.followers)
 
     def can_write_card(self, card: DeckCard) -> bool:
         return self.is_admin() or self.can_see_card(card)
@@ -295,11 +298,18 @@ def _build_deck_context(db: Session, user: User) -> DeckContext:
             .join(DeckCardTeam, DeckCardTeam.card_id == DeckCard.id)
             .filter(DeckCardTeam.team_id.in_(team_ids)).distinct().all()
         }
+    # Tableros ajenos donde sigo alguna card (follow personal): dan ACCESO para
+    # abrir esa card y cargar sus etapas/miembros en el drawer.
+    followed = {
+        row[0] for row in db.query(DeckCard.board_id)
+        .join(DeckCardFollower, DeckCardFollower.card_id == DeckCard.id)
+        .filter(DeckCardFollower.user_id == user.id).distinct().all()
+    }
     # leader y member comparten visibilidad de tableros; el leader solo se
-    # distingue por el acceso a la analítica de su equipo. `own | shared` da
-    # ACCESO (para abrir cards compartidas y sus etapas), pero solo `own` sale
-    # en el selector y ve el tablero completo; en los ajenos, solo lo compartido.
-    return DeckContext(user, role, team_ids, own | shared, own)
+    # distingue por el acceso a la analítica de su equipo. `own | shared | followed`
+    # da ACCESO (abrir cards compartidas/seguidas y sus etapas), pero solo `own`
+    # sale en el selector y ve el tablero completo; en los ajenos, solo lo permitido.
+    return DeckContext(user, role, team_ids, own | shared | followed, own)
 
 
 def _get_board_or_404(db: Session, board_id: int) -> DeckBoard:
