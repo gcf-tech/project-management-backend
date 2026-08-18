@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from app.api.dependencies import get_db
 from app.core.config import NC_URL
 from app.core.security import get_nc_user_info
-from app.core.datetime_utils import utc_now, to_rfc3339_z, UTC
+from app.core.datetime_utils import utc_now, to_rfc3339_z, ensure_aware_utc, UTC
 from app.services.nextcloud_svc import sync_user_from_nextcloud
 from app.services.email_svc import send_email
 from app.db.models import (
@@ -109,6 +109,14 @@ class ReunionIn(BaseModel):
     inicio: datetime
     fin: Optional[datetime] = None
     participantes: List[int] = []
+
+
+class ReunionPatch(BaseModel):
+    """Reprogramar o retitular. Los tres campos son opcionales y todos None se
+    rechaza con 422: un PATCH vacío no debe pasar por bueno."""
+    titulo: Optional[str] = None
+    inicio: Optional[datetime] = None   # ISO con offset; se normaliza a UTC
+    fin: Optional[datetime] = None
 
 
 # ============================================================
@@ -743,6 +751,164 @@ async def reuniones_historial(authorization: Annotated[str, Header()], dias: int
         }
         for m in rows
     ]
+
+
+# ---- Cancelar y editar una reunión ---------------------------------------
+# Un id en la ruta NO autoriza nada: las tres rutas de abajo resuelven al usuario
+# del token y comprueban en el SERVIDOR qué puede hacer con esa reunión.
+# Se distinguen dos negativas porque significan cosas distintas:
+#   404 → esa reunión no existe PARA TI (ni la creaste ni te invitaron). No se
+#         confirma que exista para otro: un id ajeno no debe poder sondearse.
+#   403 → existe y la ves porque te invitaron, pero no la creaste, así que no
+#         puedes cancelarla ni moverla. Devolver 404 aquí sería mentir sobre algo
+#         que la persona sí tiene en su panel.
+
+def _reunion_de(db: Session, meeting_id: int, user: User):
+    """(reunión, es_participante) de una reunión que el usuario puede VER.
+    Devuelve (None, False) si no existe o no es suya en ningún sentido."""
+    m = db.query(WorkspaceMeeting).filter(WorkspaceMeeting.id == meeting_id).first()
+    if not m:
+        return None, False
+    es_part = (
+        db.query(WorkspaceMeetingParticipant)
+        .filter(
+            WorkspaceMeetingParticipant.meeting_id == meeting_id,
+            WorkspaceMeetingParticipant.user_id == user.id,
+        )
+        .first()
+        is not None
+    )
+    if not es_part and m.creador_id != user.id:
+        return None, False
+    return m, es_part
+
+
+def _reunion_dict(db: Session, m: WorkspaceMeeting, user: User) -> dict:
+    """Forma completa de UNA reunión. Incluye los CORREOS de los participantes
+    porque quien va a cancelar necesita ver a quién le va a llegar el aviso; es
+    el último punto donde se detecta que la reunión no era la que se creía."""
+    correos = [
+        e for (e,) in db.query(User.email)
+        .join(WorkspaceMeetingParticipant, WorkspaceMeetingParticipant.user_id == User.id)
+        .filter(WorkspaceMeetingParticipant.meeting_id == m.id)
+        .all()
+        if e
+    ]
+    return {
+        "id": m.id,
+        "titulo": m.titulo,
+        "meetUrl": m.meet_url,
+        "inicio": to_rfc3339_z(m.inicio),
+        "fin": to_rfc3339_z(m.fin),
+        "esCreador": m.creador_id == user.id,
+        "invitados": sorted(correos),
+    }
+
+
+@router.get("/reuniones/proximas")
+async def reuniones_proximas(
+    authorization: Annotated[str, Header()],
+    dias: int = 30,
+    db: Session = Depends(get_db),
+):
+    """Reuniones del usuario de HOY en adelante. No existía: /reuniones/hoy y
+    /reuniones/historial dejaban un hueco donde justamente cae "cancela la
+    reunión de mañana", que es sobre lo que el asistente tiene que actuar."""
+    user = await _resolve_user(authorization, db)
+    dias = max(1, min(dias, 365))
+    hoy = business_today()
+    desde = datetime.combine(hoy, dtime.min, tzinfo=BOGOTA).astimezone(UTC)
+    hasta = datetime.combine(hoy + timedelta(days=dias), dtime.max, tzinfo=BOGOTA).astimezone(UTC)
+    rows = (
+        db.query(WorkspaceMeeting)
+        .join(WorkspaceMeetingParticipant, WorkspaceMeetingParticipant.meeting_id == WorkspaceMeeting.id)
+        .filter(
+            WorkspaceMeetingParticipant.user_id == user.id,   # filtro en el SERVIDOR
+            WorkspaceMeeting.inicio >= desde,
+            WorkspaceMeeting.inicio <= hasta,
+        )
+        .order_by(WorkspaceMeeting.inicio.asc())
+        .limit(50)
+        .all()
+    )
+    return [_reunion_dict(db, m, user) for m in rows]
+
+
+@router.get("/reuniones/{meeting_id}")
+async def reunion_detalle(
+    meeting_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Una reunión concreta. La declara DESPUÉS de /hoy, /historial y /proximas
+    a propósito: FastAPI resuelve por orden y {meeting_id} se tragaría "hoy"."""
+    user = await _resolve_user(authorization, db)
+    m, _ = _reunion_de(db, meeting_id, user)
+    if not m:
+        raise HTTPException(status_code=404, detail="Reunión no encontrada")
+    return _reunion_dict(db, m, user)
+
+
+@router.delete("/reuniones/{meeting_id}")
+async def borrar_reunion(
+    meeting_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Cancela la reunión borrando la fila (los participantes caen por CASCADE).
+    Devuelve la reunión tal como estaba: quien llama necesita `meetUrl` e
+    `inicio` para cancelar también el evento de Google, y leerlos de aquí evita
+    confiar en los que mande el cliente."""
+    user = await _resolve_user(authorization, db)
+    m, es_part = _reunion_de(db, meeting_id, user)
+    if not m:
+        raise HTTPException(status_code=404, detail="Reunión no encontrada")
+    if m.creador_id != user.id:
+        raise HTTPException(status_code=403, detail="Solo quien creó la reunión puede cancelarla")
+    datos = _reunion_dict(db, m, user)
+    db.delete(m)
+    db.commit()
+    return {"ok": True, "reunion": datos}
+
+
+@router.patch("/reuniones/{meeting_id}")
+async def editar_reunion(
+    meeting_id: int,
+    body: ReunionPatch,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Cambia título y/o horario. Solo el creador: mover la hora le cambia el día
+    a todos los invitados."""
+    user = await _resolve_user(authorization, db)
+    m, _ = _reunion_de(db, meeting_id, user)
+    if not m:
+        raise HTTPException(status_code=404, detail="Reunión no encontrada")
+    if m.creador_id != user.id:
+        raise HTTPException(status_code=403, detail="Solo quien creó la reunión puede editarla")
+
+    if body.titulo is None and body.inicio is None and body.fin is None:
+        raise HTTPException(status_code=422, detail="No hay nada que cambiar")
+
+    if body.titulo is not None:
+        m.titulo = body.titulo.strip()[:255]
+    try:
+        # Sin offset, la hora nueva se guardaría con la zona del servidor y la
+        # reunión se movería cinco horas sin que nadie lo pidiera.
+        if body.inicio is not None:
+            m.inicio = ensure_aware_utc(body.inicio)
+        if body.fin is not None:
+            m.fin = ensure_aware_utc(body.fin)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    # Un fin anterior al inicio deja la reunión "terminada" antes de empezar y el
+    # panel la pinta en gris para siempre: se rechaza en vez de guardarla rota.
+    if m.fin is not None and m.fin <= m.inicio:
+        raise HTTPException(status_code=422, detail="El fin debe ser posterior al inicio")
+
+    db.commit()
+    db.refresh(m)
+    return _reunion_dict(db, m, user)
 
 
 # ============================================================

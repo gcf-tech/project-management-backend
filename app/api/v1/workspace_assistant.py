@@ -41,9 +41,19 @@ class RecordatorioIn(BaseModel):
     vence_en: datetime          # ISO con offset; se normaliza a UTC
 
 
+class NotaPatch(BaseModel):
+    """Editar una nota. Los dos campos son opcionales, pero mandar los dos en
+    None se rechaza: un PATCH que no cambia nada no debe responder 200."""
+    titulo: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    cuerpo: Optional[str] = Field(default=None, min_length=1)
+
+
 class RecordatorioPatch(BaseModel):
-    # Solo cancelar: pasar a 'notificado' es cosa del scheduler.
-    estado: Literal["cancelado"]
+    # Dos operaciones distintas por la misma puerta: cancelar y reprogramar.
+    # 'notificado' sigue siendo solo del scheduler; el cliente no puede ponerlo.
+    estado: Optional[Literal["cancelado"]] = None
+    texto: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    vence_en: Optional[datetime] = None   # ISO con offset; se normaliza a UTC
 
 
 class LogIn(BaseModel):
@@ -115,6 +125,42 @@ async def listar_notas(authorization: Annotated[str, Header()], limit: int = 20,
     return [_nota_dict(x) for x in rows]
 
 
+@router.patch("/notas/{nota_id}")
+async def editar_nota(
+    nota_id: int,
+    body: NotaPatch,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Edita título y/o cuerpo. `usuario_id` va en el WHERE igual que en el
+    DELETE: una nota ajena no existe para esta query, así que responde 404 y no
+    403. La diferencia importa — un 403 confirmaría que ese id existe y
+    convertiría la ruta en un sondeo de notas de otras personas."""
+    user = await _resolve_user(authorization, db)
+    if body.titulo is None and body.cuerpo is None:
+        raise HTTPException(status_code=422, detail="No hay nada que cambiar")
+    n = (
+        db.query(WorkspaceAssistantNote)
+        .filter(
+            WorkspaceAssistantNote.id == nota_id,
+            WorkspaceAssistantNote.usuario_id == user.id,
+        )
+        .first()
+    )
+    if not n:
+        raise HTTPException(status_code=404, detail="Nota no encontrada")
+    if body.titulo is not None:
+        n.titulo = body.titulo.strip()
+    if body.cuerpo is not None:
+        n.cuerpo = body.cuerpo.strip()
+    # `origen` NO se toca: dice de dónde salió la nota, no quién la editó. Una
+    # nota dictada sigue arrastrando los errores de su transcripción original.
+    n.updated_at = utc_now()
+    db.commit()
+    db.refresh(n)
+    return _nota_dict(n)
+
+
 @router.delete("/notas/{nota_id}")
 async def borrar_nota(nota_id: int, authorization: Annotated[str, Header()], db: Session = Depends(get_db)):
     user = await _resolve_user(authorization, db)
@@ -174,27 +220,52 @@ async def listar_recordatorios(
 
 
 @router.patch("/recordatorios/{recordatorio_id}")
-async def cancelar_recordatorio(
+async def editar_recordatorio(
     recordatorio_id: int,
     body: RecordatorioPatch,
     authorization: Annotated[str, Header()],
     db: Session = Depends(get_db),
 ):
+    """Cancelar o reprogramar. Van juntos porque son el mismo recurso y el mismo
+    dueño; lo que cambia es qué campos llegan."""
     user = await _resolve_user(authorization, db)
+    if body.estado is None and body.texto is None and body.vence_en is None:
+        raise HTTPException(status_code=422, detail="No hay nada que cambiar")
     r = (
         db.query(WorkspaceAssistantReminder)
         .filter(
             WorkspaceAssistantReminder.id == recordatorio_id,
-            WorkspaceAssistantReminder.usuario_id == user.id,
+            WorkspaceAssistantReminder.usuario_id == user.id,   # 404, no 403: ver editar_nota
         )
         .first()
     )
     if not r:
         raise HTTPException(status_code=404, detail="Recordatorio no encontrado")
+
     # Cancelar uno ya notificado ocultaría un aviso que la persona ya recibió.
-    if r.estado == "notificado":
-        raise HTTPException(status_code=409, detail="Ese recordatorio ya se notificó")
-    r.estado = "cancelado"
+    # Reprogramarlo NO: mover al futuro uno que ya sonó es justo el caso de
+    # "pospónmelo", así que esa comprobación se queda solo en la cancelación.
+    if body.estado == "cancelado":
+        if r.estado == "notificado":
+            raise HTTPException(status_code=409, detail="Ese recordatorio ya se notificó")
+        r.estado = "cancelado"
+
+    if body.texto is not None:
+        r.texto = body.texto.strip()
+
+    if body.vence_en is not None:
+        try:
+            r.vence_en = ensure_aware_utc(body.vence_en)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        # Al reprogramar vuelve a estar pendiente y se borra la marca de aviso:
+        # un recordatorio ya notificado que se mueve al futuro tiene que volver a
+        # sonar, y con `notificado_en` puesto el scheduler lo dejaría pasar.
+        # Va después del bloque de cancelación a propósito: "cancélalo y muévelo"
+        # no tiene sentido, y si llegan los dos manda la fecha nueva.
+        r.estado = "pendiente"
+        r.notificado_en = None
+
     db.commit()
     db.refresh(r)
     return _recordatorio_dict(r)
