@@ -1,16 +1,29 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
-from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router, calendar, reports, commercial, assessment, deck, workspace, portafolios
+from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router, calendar, reports, commercial, assessment, deck, workspace, workspace_assistant, portafolios
+from app.services.assistant_reminders import bucle_recordatorios
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("[INFO] Activity Tracker API started")
-    yield
-    print("[INFO] Activity Tracker API shutting down")
+    # Scheduler de recordatorios del asistente. Va aquí y no en el Express del
+    # workspace, cuyo estado es volátil y se pierde en cada reinicio.
+    tarea_recordatorios = asyncio.create_task(bucle_recordatorios())
+    try:
+        yield
+    finally:
+        # Sin cancelar, un reload deja el bucle huérfano golpeando la BD.
+        tarea_recordatorios.cancel()
+        try:
+            await tarea_recordatorios
+        except asyncio.CancelledError:
+            pass
+        print("[INFO] Activity Tracker API shutting down")
 
 
 app = FastAPI(
@@ -56,6 +69,8 @@ app.include_router(commercial.router,   prefix="/api/commercial")
 app.include_router(assessment.router,   prefix="/api/assessment")
 app.include_router(deck.router,         prefix="/api/decks")  # /api/deck is a legacy NC-proxy in teams.py
 app.include_router(workspace.router,    prefix="/api/workspace")
+# No se solapa con /api/workspace: aquel no define rutas "assistant/…"
+app.include_router(workspace_assistant.router, prefix="/api/workspace/assistant")
 app.include_router(portafolios.router,   prefix="/api/portafolios")
 
 @app.get("/health")

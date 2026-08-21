@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from app.api.dependencies import get_db
 from app.core.config import NC_URL
 from app.core.security import get_nc_user_info
-from app.core.datetime_utils import utc_now, to_rfc3339_z, UTC
+from app.core.datetime_utils import utc_now, to_rfc3339_z, ensure_aware_utc, UTC
 from app.services.nextcloud_svc import sync_user_from_nextcloud
 from app.services.email_svc import send_email
 from app.db.models import (
@@ -109,6 +109,14 @@ class ReunionIn(BaseModel):
     inicio: datetime
     fin: Optional[datetime] = None
     participantes: List[int] = []
+
+
+class ReunionPatch(BaseModel):
+    """Reprogramar o retitular. Los tres campos son opcionales y todos None se
+    rechaza con 422: un PATCH vacío no debe pasar por bueno."""
+    titulo: Optional[str] = None
+    inicio: Optional[datetime] = None   # ISO con offset; se normaliza a UTC
+    fin: Optional[datetime] = None
 
 
 # ============================================================
@@ -622,23 +630,106 @@ def _ical_esc(s: str) -> str:
     return str(s or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
 
-async def _crear_evento_caldav(authorization, nc_user_id, ev_uid, titulo, inicio, fin, descripcion=""):
-    """Best-effort: crea un VEVENT en el calendario 'personal' de Nextcloud del usuario."""
-    def fmt(dt):
-        return dt.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+def _fmt_ics(dt: datetime) -> str:
+    """Datetime → 'YYYYMMDDTHHMMSSZ'. Un naive se toma como UTC, la misma
+    convención de `to_rfc3339_z`: al reemitir el .ics los valores vienen de MySQL
+    y pueden llegar sin tzinfo, y asumir la zona del servidor movería el evento
+    cinco horas sin que nadie lo pidiera."""
+    aware = dt if dt.tzinfo is not None and dt.utcoffset() is not None else dt.replace(tzinfo=UTC)
+    return aware.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _url_evento_caldav(nc_user_id: str, ev_uid: str) -> str:
+    """URL del .ics en el calendario 'personal'. Vive en UN solo sitio porque el
+    borrado y la reemisión tienen que reconstruir EXACTAMENTE la URL que usó el
+    alta: el UID es determinista (`gcfws-{id}`), así que no hay nada que buscar,
+    pero solo mientras las tres la construyan igual.
+
+    `safe=""` y no el `safe="/"` por defecto: una barra sin escapar en el id de
+    usuario dejaría de ser un segmento del calendario propio para apuntar a otra
+    ruta del servidor DAV. Para un id normal no cambia nada."""
+    return (
+        f"{NC_URL}/remote.php/dav/calendars/"
+        f"{urllib.parse.quote(nc_user_id, safe='')}/personal/{urllib.parse.quote(ev_uid, safe='')}.ics"
+    )
+
+
+def _vevent_ics(ev_uid, titulo, inicio, fin, descripcion="", sequence=0) -> bytes:
     lines = [
         "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//GCF//Workspace//ES", "CALSCALE:GREGORIAN",
-        "BEGIN:VEVENT", f"UID:{ev_uid}@gcf-workspace", f"DTSTAMP:{fmt(utc_now())}",
-        f"DTSTART:{fmt(inicio)}", f"DTEND:{fmt(fin)}", f"SUMMARY:{_ical_esc(titulo)}",
+        "BEGIN:VEVENT", f"UID:{ev_uid}@gcf-workspace", f"DTSTAMP:{_fmt_ics(utc_now())}",
+        f"DTSTART:{_fmt_ics(inicio)}", f"DTEND:{_fmt_ics(fin)}", f"SUMMARY:{_ical_esc(titulo)}",
+        f"SEQUENCE:{int(sequence)}",
     ]
     if descripcion:
         lines.append(f"DESCRIPTION:{_ical_esc(descripcion)}")
     lines += ["END:VEVENT", "END:VCALENDAR"]
-    payload = ("\r\n".join(lines) + "\r\n").encode("utf-8")
-    url = f"{NC_URL}/remote.php/dav/calendars/{urllib.parse.quote(nc_user_id)}/personal/{urllib.parse.quote(ev_uid)}.ics"
+    return ("\r\n".join(lines) + "\r\n").encode("utf-8")
+
+
+async def _put_evento_caldav(authorization, nc_user_id, ev_uid, payload) -> bool:
     async with httpx.AsyncClient(timeout=20.0) as client:
-        r = await client.put(url, headers={"Authorization": authorization, "Content-Type": "text/calendar; charset=utf-8"}, content=payload)
+        r = await client.put(
+            _url_evento_caldav(nc_user_id, ev_uid),
+            headers={"Authorization": authorization, "Content-Type": "text/calendar; charset=utf-8"},
+            content=payload,
+        )
     return r.status_code in (200, 201, 204)
+
+
+async def _crear_evento_caldav(authorization, nc_user_id, ev_uid, titulo, inicio, fin, descripcion=""):
+    """Best-effort: crea un VEVENT en el calendario 'personal' de Nextcloud del usuario."""
+    payload = _vevent_ics(ev_uid, titulo, inicio, fin, descripcion, sequence=0)
+    return await _put_evento_caldav(authorization, nc_user_id, ev_uid, payload)
+
+
+async def _sequence_actual_caldav(authorization, nc_user_id, ev_uid) -> int:
+    """SEQUENCE del .ics que ya está en Nextcloud. iCalendar pide incrementarlo en
+    cada actualización, y no hay columna donde guardarlo (este cambio no trae
+    migración), así que se lee del propio recurso. Si no se puede leer → 0, que
+    solo arriesga que un cliente ignore la actualización, nunca que se pierda."""
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.get(
+                _url_evento_caldav(nc_user_id, ev_uid),
+                headers={"Authorization": authorization},
+            )
+        if r.status_code != 200:
+            return 0
+        m = re.search(r"^SEQUENCE:(\d+)", r.text, re.MULTILINE)
+        return int(m.group(1)) if m else 0
+    except Exception:
+        return 0
+
+
+async def _actualizar_evento_caldav(authorization, nc_user_id, ev_uid, titulo, inicio, fin, descripcion=""):
+    """Best-effort: reemite el .ics con los datos nuevos — mismo UID, DTSTAMP nuevo
+    y SEQUENCE+1, que es lo que iCalendar entiende por 'esto es una actualización'
+    y no por 'esto es otro evento'."""
+    seq = await _sequence_actual_caldav(authorization, nc_user_id, ev_uid) + 1
+    payload = _vevent_ics(ev_uid, titulo, inicio, fin, descripcion, sequence=seq)
+    return await _put_evento_caldav(authorization, nc_user_id, ev_uid, payload)
+
+
+async def _borrar_evento_caldav(authorization, nc_user_id, ev_uid) -> bool:
+    """Espejo del alta: borra el .ics que creó `_crear_evento_caldav`.
+
+    Un **404 es ÉXITO**: significa que la copia ya no está, que es exactamente lo
+    que se pedía. Tratarlo como fallo haría que cancelar dos veces la misma
+    reunión reportara un problema inventado.
+
+    Nunca lanza — devuelve en qué acabó. Quien llama lo reporta en vez de
+    tragárselo: tragarse este fallo en silencio es lo que dejó eventos fantasma
+    en el drawer de Calendario sin fila en MySQL que los explicara."""
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.delete(
+                _url_evento_caldav(nc_user_id, ev_uid),
+                headers={"Authorization": authorization},
+            )
+    except Exception:
+        return False
+    return r.status_code in (200, 202, 204, 404)
 
 
 @router.post("/reuniones")
@@ -662,7 +753,12 @@ async def crear_reunion(body: ReunionIn, authorization: Annotated[str, Header()]
     db.commit()
     db.refresh(m)
 
-    # también crear el evento en el calendario Nextcloud del organizador (best-effort)
+    # También el evento en el calendario Nextcloud del organizador (best-effort).
+    # SOLO el del organizador, a propósito: a los invitados el evento les llega por
+    # la invitación de Google, que es la que sabe de asistentes, respuestas y Meet.
+    # Escribirles además por CalDAV les dejaría DOS eventos para la misma reunión,
+    # uno de ellos sin poder responder. El borrado y la reemisión son espejo de
+    # esto y tocan exactamente la misma copia, ni una más.
     try:
         fin_dt = body.fin or (body.inicio + timedelta(hours=1))
         desc = ("Reunión de GCF Workspace. " + (body.meetUrl or "")).strip()
@@ -743,6 +839,195 @@ async def reuniones_historial(authorization: Annotated[str, Header()], dias: int
         }
         for m in rows
     ]
+
+
+# ---- Cancelar y editar una reunión ---------------------------------------
+# Un id en la ruta NO autoriza nada: las tres rutas de abajo resuelven al usuario
+# del token y comprueban en el SERVIDOR qué puede hacer con esa reunión.
+# Se distinguen dos negativas porque significan cosas distintas:
+#   404 → esa reunión no existe PARA TI (ni la creaste ni te invitaron). No se
+#         confirma que exista para otro: un id ajeno no debe poder sondearse.
+#   403 → existe y la ves porque te invitaron, pero no la creaste, así que no
+#         puedes cancelarla ni moverla. Devolver 404 aquí sería mentir sobre algo
+#         que la persona sí tiene en su panel.
+
+def _reunion_de(db: Session, meeting_id: int, user: User):
+    """(reunión, es_participante) de una reunión que el usuario puede VER.
+    Devuelve (None, False) si no existe o no es suya en ningún sentido."""
+    m = db.query(WorkspaceMeeting).filter(WorkspaceMeeting.id == meeting_id).first()
+    if not m:
+        return None, False
+    es_part = (
+        db.query(WorkspaceMeetingParticipant)
+        .filter(
+            WorkspaceMeetingParticipant.meeting_id == meeting_id,
+            WorkspaceMeetingParticipant.user_id == user.id,
+        )
+        .first()
+        is not None
+    )
+    if not es_part and m.creador_id != user.id:
+        return None, False
+    return m, es_part
+
+
+def _reunion_dict(db: Session, m: WorkspaceMeeting, user: User) -> dict:
+    """Forma completa de UNA reunión. Incluye los CORREOS de los participantes
+    porque quien va a cancelar necesita ver a quién le va a llegar el aviso; es
+    el último punto donde se detecta que la reunión no era la que se creía."""
+    correos = [
+        e for (e,) in db.query(User.email)
+        .join(WorkspaceMeetingParticipant, WorkspaceMeetingParticipant.user_id == User.id)
+        .filter(WorkspaceMeetingParticipant.meeting_id == m.id)
+        .all()
+        if e
+    ]
+    return {
+        "id": m.id,
+        "titulo": m.titulo,
+        "meetUrl": m.meet_url,
+        "inicio": to_rfc3339_z(m.inicio),
+        "fin": to_rfc3339_z(m.fin),
+        "esCreador": m.creador_id == user.id,
+        "invitados": sorted(correos),
+    }
+
+
+@router.get("/reuniones/proximas")
+async def reuniones_proximas(
+    authorization: Annotated[str, Header()],
+    dias: int = 30,
+    db: Session = Depends(get_db),
+):
+    """Reuniones del usuario de HOY en adelante. No existía: /reuniones/hoy y
+    /reuniones/historial dejaban un hueco donde justamente cae "cancela la
+    reunión de mañana", que es sobre lo que el asistente tiene que actuar."""
+    user = await _resolve_user(authorization, db)
+    dias = max(1, min(dias, 365))
+    hoy = business_today()
+    desde = datetime.combine(hoy, dtime.min, tzinfo=BOGOTA).astimezone(UTC)
+    hasta = datetime.combine(hoy + timedelta(days=dias), dtime.max, tzinfo=BOGOTA).astimezone(UTC)
+    rows = (
+        db.query(WorkspaceMeeting)
+        .join(WorkspaceMeetingParticipant, WorkspaceMeetingParticipant.meeting_id == WorkspaceMeeting.id)
+        .filter(
+            WorkspaceMeetingParticipant.user_id == user.id,   # filtro en el SERVIDOR
+            WorkspaceMeeting.inicio >= desde,
+            WorkspaceMeeting.inicio <= hasta,
+        )
+        .order_by(WorkspaceMeeting.inicio.asc())
+        .limit(50)
+        .all()
+    )
+    return [_reunion_dict(db, m, user) for m in rows]
+
+
+@router.get("/reuniones/{meeting_id}")
+async def reunion_detalle(
+    meeting_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Una reunión concreta. La declara DESPUÉS de /hoy, /historial y /proximas
+    a propósito: FastAPI resuelve por orden y {meeting_id} se tragaría "hoy"."""
+    user = await _resolve_user(authorization, db)
+    m, _ = _reunion_de(db, meeting_id, user)
+    if not m:
+        raise HTTPException(status_code=404, detail="Reunión no encontrada")
+    return _reunion_dict(db, m, user)
+
+
+@router.delete("/reuniones/{meeting_id}")
+async def borrar_reunion(
+    meeting_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Cancela la reunión borrando la fila (los participantes caen por CASCADE).
+    Devuelve la reunión tal como estaba: quien llama necesita `meetUrl` e
+    `inicio` para cancelar también el evento de Google, y leerlos de aquí evita
+    confiar en los que mande el cliente.
+
+    Borra ADEMÁS la copia CalDAV que creó `POST /reuniones`. El alta escribe en
+    dos sitios (MySQL + un .ics en Nextcloud) y durante un tiempo la baja borró
+    solo en uno: el evento sobrevivía en el drawer de Calendario sin ninguna fila
+    que lo explicara. `caldav_borrado` dice si esta vez se limpió."""
+    user = await _resolve_user(authorization, db)
+    m, es_part = _reunion_de(db, meeting_id, user)
+    if not m:
+        raise HTTPException(status_code=404, detail="Reunión no encontrada")
+    if m.creador_id != user.id:
+        raise HTTPException(status_code=403, detail="Solo quien creó la reunión puede cancelarla")
+    datos = _reunion_dict(db, m, user)
+    # CalDAV va ANTES que MySQL. Si Nextcloud falla, la reunión sigue existiendo y
+    # se puede reintentar; al revés quedaría la copia huérfana y ya sin fila desde
+    # la que reintentar nada. Best-effort igual que el alta: no tumba la
+    # cancelación, pero a diferencia del alta el resultado SÍ se reporta.
+    caldav_borrado = await _borrar_evento_caldav(authorization, user.nc_user_id, f"gcfws-{m.id}")
+    db.delete(m)
+    db.commit()
+    return {"ok": True, "reunion": datos, "caldav_borrado": caldav_borrado}
+
+
+@router.patch("/reuniones/{meeting_id}")
+async def editar_reunion(
+    meeting_id: int,
+    body: ReunionPatch,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Cambia título y/o horario. Solo el creador: mover la hora le cambia el día
+    a todos los invitados.
+
+    Reemite además el .ics de Nextcloud. Es la misma asimetría que tenía el
+    borrado —el alta escribe en dos sitios y la edición actualizaba uno— pero
+    estaba tapada: el evento fantasma que dejaba la cancelación se notaba antes
+    que un evento con la hora vieja."""
+    user = await _resolve_user(authorization, db)
+    m, _ = _reunion_de(db, meeting_id, user)
+    if not m:
+        raise HTTPException(status_code=404, detail="Reunión no encontrada")
+    if m.creador_id != user.id:
+        raise HTTPException(status_code=403, detail="Solo quien creó la reunión puede editarla")
+
+    if body.titulo is None and body.inicio is None and body.fin is None:
+        raise HTTPException(status_code=422, detail="No hay nada que cambiar")
+
+    if body.titulo is not None:
+        m.titulo = body.titulo.strip()[:255]
+    try:
+        # Sin offset, la hora nueva se guardaría con la zona del servidor y la
+        # reunión se movería cinco horas sin que nadie lo pidiera.
+        if body.inicio is not None:
+            m.inicio = ensure_aware_utc(body.inicio)
+        if body.fin is not None:
+            m.fin = ensure_aware_utc(body.fin)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    # Un fin anterior al inicio deja la reunión "terminada" antes de empezar y el
+    # panel la pinta en gris para siempre: se rechaza en vez de guardarla rota.
+    if m.fin is not None and m.fin <= m.inicio:
+        raise HTTPException(status_code=422, detail="El fin debe ser posterior al inicio")
+
+    db.commit()
+    db.refresh(m)
+
+    # Mismos valores que usó el alta, recalculados desde la fila ya guardada: un
+    # `fin` nulo son 60 min, y la descripción vuelve a llevar el enlace de Meet.
+    caldav_actualizado = False
+    try:
+        fin_dt = m.fin or (m.inicio + timedelta(hours=1))
+        desc = ("Reunión de GCF Workspace. " + (m.meet_url or "")).strip()
+        caldav_actualizado = await _actualizar_evento_caldav(
+            authorization, user.nc_user_id, f"gcfws-{m.id}",
+            m.titulo or "Reunión", m.inicio, fin_dt, desc,
+        )
+    except Exception:
+        pass
+
+    salida = _reunion_dict(db, m, user)
+    salida["caldav_actualizado"] = caldav_actualizado
+    return salida
 
 
 # ============================================================
