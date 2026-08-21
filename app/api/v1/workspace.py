@@ -48,6 +48,27 @@ def business_today() -> date:
     return datetime.now(BOGOTA).date()
 
 
+# Equipo del Deck → oficina del workspace (id de oficina, etiqueta visible).
+TEAM_OFICINA = {
+    "tech": ("tech", "Tecnología"),
+    "commercial": ("comm", "Comercial"),
+    "marketing": ("mkt", "Marketing"),
+    "finance": ("fin", "Finanzas"),
+    "admin": ("admin", "Administración"),
+    "operaciones": ("ops", "Operaciones"),
+    "criptox": ("crypto", "CryptoX"),
+    "cryptox": ("crypto", "CryptoX"),
+    "coordinación": ("ceo", "Dirección"),
+    "coordinacion": ("ceo", "Dirección"),
+}
+
+
+def _oficina_de(user):
+    """(id_oficina, etiqueta) según el equipo del usuario, o None."""
+    t = (user.team.name if getattr(user, "team", None) else "") or ""
+    return TEAM_OFICINA.get(t.lower().strip())
+
+
 # ============================================================
 # SCHEMAS
 # ============================================================
@@ -153,6 +174,8 @@ def _perfil_dict(u: User, p: Optional[WorkspaceProfile]) -> dict:
         "rendimiento": p.rendimiento if p else None,
         "estado": p.estado if p else None,
         "onboarded": bool(p.onboarded) if p else False,
+        "oficina": (_oficina_de(u) or (None, None))[0],        # id de su oficina (por equipo)
+        "oficina_label": (_oficina_de(u) or (None, None))[1],  # nombre de su oficina
     }
 
 
@@ -972,6 +995,20 @@ async def talk_send(token: str, body: MensajeTalkIn, authorization: Annotated[st
     return {"id": (resp or {}).get("id")}
 
 
+class EditarMsgIn(BaseModel):
+    message: str
+
+
+@router.put("/talk/rooms/{token}/messages/{message_id}")
+async def talk_edit(token: str, message_id: int, body: EditarMsgIn, authorization: Annotated[str, Header()]):
+    """Edita un mensaje propio (Talk permite editar dentro de una ventana de tiempo)."""
+    texto = (body.message or "").strip()
+    if not texto:
+        raise HTTPException(status_code=400, detail="Mensaje vacío")
+    await _talk("PUT", f"/api/v1/chat/{token}/{message_id}", authorization, data={"message": texto})
+    return {"ok": True}
+
+
 class ReaccionIn(BaseModel):
     reaction: str
 
@@ -1138,6 +1175,7 @@ class NewsIn(BaseModel):
     titulo: Optional[str] = None
     tipo: Optional[str] = "nota"  # nota | empresa | cumple | evento
     imagen_url: Optional[str] = None
+    scope: Optional[str] = "general"  # "general" (Holding) | "oficina" (mi oficina)
 
 
 _NEWS_TIPOS = {"nota", "empresa", "cumple", "evento"}
@@ -1151,6 +1189,7 @@ def _news_dict(n: WorkspaceNews) -> dict:
         "titulo": n.titulo,
         "cuerpo": n.cuerpo,
         "imagen_url": n.imagen_url,
+        "oficina": n.oficina,
         "fijado": bool(n.fijado),
         "created_at": to_rfc3339_z(n.created_at),
         "autor_id": n.autor_id,
@@ -1163,17 +1202,21 @@ def _news_dict(n: WorkspaceNews) -> dict:
 async def listar_news(
     authorization: Annotated[str, Header()],
     limit: int = 30,
+    scope: str = "general",   # "general" (Holding) | "oficina" (la del usuario)
     db: Session = Depends(get_db),
 ):
-    """Últimas novedades: primero las fijadas, luego por fecha descendente."""
-    await _resolve_user(authorization, db)  # requiere sesión válida
+    """Novedades: primero fijadas, luego por fecha desc. scope filtra general vs oficina."""
+    user = await _resolve_user(authorization, db)
     limit = max(1, min(limit, 100))
-    rows = (
-        db.query(WorkspaceNews)
-        .order_by(WorkspaceNews.fijado.desc(), WorkspaceNews.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    q = db.query(WorkspaceNews)
+    if scope == "oficina":
+        ofi = _oficina_de(user)
+        if not ofi:
+            return []
+        q = q.filter(WorkspaceNews.oficina == ofi[0])
+    else:
+        q = q.filter(WorkspaceNews.oficina.is_(None))
+    rows = q.order_by(WorkspaceNews.fijado.desc(), WorkspaceNews.created_at.desc()).limit(limit).all()
     return [_news_dict(n) for n in rows]
 
 
@@ -1198,11 +1241,19 @@ async def crear_news(
     # Solo un gerente/admin puede publicar avisos "empresa" (comunicados oficiales).
     if tipo == "empresa" and not _is_manager(user):
         tipo = "nota"
+    # ámbito: general (Holding) o la oficina del usuario
+    oficina = None
+    if (body.scope or "general") == "oficina":
+        ofi = _oficina_de(user)
+        if not ofi:
+            raise HTTPException(status_code=400, detail="No tienes una oficina asignada")
+        oficina = ofi[0]
     n = WorkspaceNews(
         tipo=tipo,
         titulo=(body.titulo or "").strip() or None,
         cuerpo=cuerpo[:4000],
         imagen_url=imagen_url,
+        oficina=oficina,
         autor_id=user.id,
         created_at=utc_now(),
     )

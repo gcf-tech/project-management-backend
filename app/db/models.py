@@ -1130,6 +1130,7 @@ class WorkspaceNews(Base):
     titulo = Column(String(255), nullable=True)
     cuerpo = Column(Text, nullable=False)
     imagen_url = Column(String(1000), nullable=True)  # imagen adjunta (enlace público de Nextcloud)
+    oficina = Column(String(30), nullable=True)  # NULL = general (Holding); "mkt","tech"… = de esa oficina
     autor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     fijado = Column(Boolean, default=False, nullable=False, server_default="0")
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
