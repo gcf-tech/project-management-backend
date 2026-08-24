@@ -628,6 +628,9 @@ class DeckCard(Base):
 
     start_date = Column(DateTime(timezone=True), nullable=True)  # con hora
     due_date = Column(DateTime(timezone=True), nullable=True)
+    # La fecha de vencimiento fue derivada automáticamente de las subtareas (la más
+    # lejana) por no tener una fecha manual. Si el usuario la fija a mano → False.
+    due_auto = Column(Boolean, nullable=False, default=False, server_default="0")
     completed_at = Column(DateTime(timezone=True), nullable=True)
     archived = Column(Boolean, default=False)
     # Estado de la tarea (independiente de la etapa/columna, que es del flujo del
