@@ -69,6 +69,10 @@ def _oficina_de(user):
     return TEAM_OFICINA.get(t.lower().strip())
 
 
+# ids de oficina válidos (para validar el parámetro de los tableros por oficina)
+_OFICINA_IDS = {v[0] for v in TEAM_OFICINA.values()}
+
+
 # ============================================================
 # SCHEMAS
 # ============================================================
@@ -1294,6 +1298,15 @@ async def talk_edit(token: str, message_id: int, body: EditarMsgIn, authorizatio
     return {"ok": True}
 
 
+@router.delete("/talk/rooms/{token}/messages/{message_id}")
+async def talk_delete(token: str, message_id: int, authorization: Annotated[str, Header()]):
+    """Borra un mensaje. Talk lo convierte en 'mensaje eliminado' (systemMessage), que
+    nuestra lista ya omite → el mensaje desaparece para todos. Solo el autor (o un
+    moderador) puede borrar dentro de la ventana permitida; si no, Talk responde 403/405."""
+    await _talk("DELETE", f"/api/v1/chat/{token}/{message_id}", authorization)
+    return {"ok": True}
+
+
 class ReaccionIn(BaseModel):
     reaction: str
 
@@ -1487,18 +1500,24 @@ def _news_dict(n: WorkspaceNews) -> dict:
 async def listar_news(
     authorization: Annotated[str, Header()],
     limit: int = 30,
-    scope: str = "general",   # "general" (Holding) | "oficina" (la del usuario)
+    scope: str = "general",   # "general" (Holding) | "oficina"
+    oficina: Optional[str] = None,  # id de oficina explícito (tablero de esa oficina); si no, la del usuario
     db: Session = Depends(get_db),
 ):
-    """Novedades: primero fijadas, luego por fecha desc. scope filtra general vs oficina."""
+    """Novedades: primero fijadas, luego por fecha desc. scope filtra general vs oficina.
+    Con scope=oficina se puede pedir una oficina concreta (los tableros de cada oficina),
+    o la del usuario si no se especifica."""
     user = await _resolve_user(authorization, db)
     limit = max(1, min(limit, 100))
     q = db.query(WorkspaceNews)
     if scope == "oficina":
-        ofi = _oficina_de(user)
-        if not ofi:
-            return []
-        q = q.filter(WorkspaceNews.oficina == ofi[0])
+        ofi_id = oficina if (oficina and oficina in _OFICINA_IDS) else None
+        if not ofi_id:
+            ofi = _oficina_de(user)
+            if not ofi:
+                return []
+            ofi_id = ofi[0]
+        q = q.filter(WorkspaceNews.oficina == ofi_id)
     else:
         q = q.filter(WorkspaceNews.oficina.is_(None))
     rows = q.order_by(WorkspaceNews.fijado.desc(), WorkspaceNews.created_at.desc()).limit(limit).all()

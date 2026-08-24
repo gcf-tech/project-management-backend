@@ -379,6 +379,76 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
         return datetime.fromisoformat(value[:10] + "T00:00:00+00:00")
 
 
+def _recompute_parent_due(db: Session, parent_id: Optional[int], _seen=None):
+    """Deriva la fecha de vencimiento de una tarea desde sus subtareas.
+
+    Regla: si la tarea NO tiene fecha manual (due_auto=True o sin fecha), su
+    vencimiento pasa a ser el MÁS LEJANO de sus subtareas. Si el usuario fijó la
+    fecha a mano (due_auto=False y con fecha), no se toca. Burbujea hacia arriba
+    por si el padre es a su vez subtarea.
+    """
+    if not parent_id:
+        return
+    _seen = _seen or set()
+    if parent_id in _seen:            # anti-ciclo (por seguridad)
+        return
+    _seen.add(parent_id)
+    parent = db.query(DeckCard).filter(DeckCard.id == parent_id).first()
+    if not parent:
+        return
+    # Solo auto-derivar si no hay fecha manual.
+    if not (parent.due_auto or parent.due_date is None):
+        return
+    rows = db.query(DeckCard.due_date).filter(
+        DeckCard.parent_card_id == parent.id,
+        DeckCard.archived.is_(False),
+        DeckCard.due_date.isnot(None),
+    ).all()
+    dues = [r[0] for r in rows if r[0] is not None]
+    new_due = max(dues, key=lambda d: _as_utc(d)) if dues else None
+    if new_due != parent.due_date:
+        parent.due_date = new_due
+        parent.updated_at = utc_now()
+    parent.due_auto = new_due is not None
+    if parent.parent_card_id:
+        _recompute_parent_due(db, parent.parent_card_id, _seen)
+
+
+def _start_parent_chain(db: Session, parent_id: Optional[int], user, _seen=None):
+    """Al iniciar (sacar de 'Creación') una subtarea, inicia también a su tarea
+    padre: la mueve fuera de la primera etapa y le pone estado 'in_progress'.
+    Burbujea hacia arriba por si el padre es a su vez subtarea."""
+    _seen = _seen or set()
+    if not parent_id or parent_id in _seen:
+        return
+    _seen.add(parent_id)
+    parent = db.query(DeckCard).filter(DeckCard.id == parent_id).first()
+    if not parent:
+        return
+    cols = db.query(DeckColumn).filter(
+        DeckColumn.board_id == parent.board_id).order_by(DeckColumn.position).all()
+    if not cols:
+        return
+    first_id = cols[0].id
+    moved = False
+    if parent.column_id == first_id and len(cols) > 1:
+        target = cols[1]
+        from_col = parent.column_id
+        parent.column_id = target.id
+        parent.position = _next_position(db, DeckCard, column_id=target.id)
+        moved = True
+        _log_activity(db, parent, user, "moved",
+                      payload={"from": from_col, "to": target.id},
+                      message=f"Iniciada automáticamente al iniciar una subtarea", notify=False)
+    if parent.status == "not_started":
+        parent.status = "in_progress"
+        moved = True
+    if moved:
+        parent.updated_at = utc_now()
+    if parent.parent_card_id:
+        _start_parent_chain(db, parent.parent_card_id, user, _seen)
+
+
 EDIT_WINDOW = timedelta(minutes=5)
 
 def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -468,6 +538,7 @@ def _serialize_card(card: DeckCard, *, full=False, sub=None) -> Dict[str, Any]:
         "status": card.status or "not_started",
         "startDate": card.start_date.isoformat() if card.start_date else None,
         "dueDate": card.due_date.isoformat() if card.due_date else None,
+        "dueAuto": bool(card.due_auto),
         "completedAt": card.completed_at.isoformat() if card.completed_at else None,
         "archived": bool(card.archived),
         "assignees": [_user_brief(a.user) for a in card.assignees],
@@ -1341,6 +1412,7 @@ async def create_subtask(
     db.flush()
     db.refresh(card)
     _log_activity(db, card, user, "created", message=f"{user.display_name} creó esta subtarea", notify=False)
+    _recompute_parent_due(db, parent.id)
     db.commit()
     db.refresh(card)
     return _serialize_subtask(card)
@@ -1405,6 +1477,7 @@ async def create_subtasks_bulk(
         _log_activity(db, card, user, "created", message=f"{user.display_name} creó esta subtarea", notify=False)
         created.append(card)
 
+    _recompute_parent_due(db, parent.id)
     db.commit()
     for c in created:
         db.refresh(c)
@@ -1531,12 +1604,17 @@ async def patch_card(
         _gate("dueDate")
         old_due = card.due_date
         card.due_date = _parse_dt(body.dueDate)
+        # Fijada a mano → deja de derivarse de subtareas.
+        card.due_auto = False
         if old_due != card.due_date:
             _log_activity(db, card, user, "due_changed",
                           payload={"to": card.due_date.isoformat() if card.due_date else None},
                           message=f"{user.display_name} cambió la fecha de vencimiento",
                           notif_key="notif.due_changed",
                           notif_vars={"actor": user.display_name})
+            # Si es subtarea, su cambio de fecha puede afectar el vencimiento del padre.
+            if card.parent_card_id:
+                _recompute_parent_due(db, card.parent_card_id)
     if body.status is not None and body.status != (card.status or "not_started"):
         if body.status not in CARD_STATUSES:
             raise HTTPException(status_code=400, detail="Estado inválido")
@@ -1598,11 +1676,14 @@ async def move_card(
         c.updated_at = utc_now()
 
     # Al salir de la PRIMERA etapa (empezarla), si seguía 'not_started' → 'in_progress'.
-    if from_col != body.columnId and card.status == "not_started":
-        first_pos = db.query(func.min(DeckColumn.position)).filter(
-            DeckColumn.board_id == card.board_id).scalar()
-        if target_col.position != first_pos:
-            card.status = "in_progress"
+    first_pos = db.query(func.min(DeckColumn.position)).filter(
+        DeckColumn.board_id == card.board_id).scalar()
+    started_now = from_col != body.columnId and target_col.position != first_pos
+    if started_now and card.status == "not_started":
+        card.status = "in_progress"
+    # Regla: iniciar una subtarea inicia también a su tarea padre.
+    if started_now and card.parent_card_id:
+        _start_parent_chain(db, card.parent_card_id, user)
 
     if from_col != body.columnId:
         _log_activity(db, card, user, "moved",
@@ -1680,6 +1761,8 @@ async def archive_card(
     card.archived = True
     card.updated_at = utc_now()
     _log_activity(db, card, user, "archived", message=f"{user.display_name} archived this card", notify=False)
+    if card.parent_card_id:
+        _recompute_parent_due(db, card.parent_card_id)
     db.commit()
     return {"success": True}
 
@@ -1713,7 +1796,11 @@ async def delete_card(
     card = _get_card_or_404(db, card_id)
     _require_perm(db, ctx, card, "delete")
     board_id = card.board_id
+    parent_id = card.parent_card_id
     db.delete(card)
+    db.flush()
+    if parent_id:
+        _recompute_parent_due(db, parent_id)
     db.commit()
     _publish_card_event(board_id, card_id, "deleted", user.id)
     return {"success": True}
@@ -2667,6 +2754,7 @@ async def board_timeline(
             "priority": c.priority,
             "columnId": c.column_id,
             "assignees": [_user_brief(a.user) for a in c.assignees],
+            "tags": [{"id": ct.tag.id, "name": ct.tag.name} for ct in c.tags if ct.tag],
         })
     return {"cards": out}
 
