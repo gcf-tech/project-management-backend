@@ -9,11 +9,15 @@ Notas:
   el WHERE, igual que en /reuniones/hoy. Aquí quien escribe es un modelo de
   lenguaje interpretando voz.
 - Todo se persiste en UTC: `ensure_aware_utc` rechaza los datetime naive.
+- La zona horaria de un recordatorio es un METADATO: se guarda para poder
+  re-renderizar y auditar, y NO reinterpreta `vence_en`. El instante sigue
+  saliendo del offset que trae el ISO, como hasta ahora.
 """
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import Annotated, List, Optional, Literal
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_db
@@ -39,6 +43,9 @@ class NotaIn(BaseModel):
 class RecordatorioIn(BaseModel):
     texto: str = Field(min_length=1, max_length=500)
     vence_en: datetime          # ISO con offset; se normaliza a UTC
+    # Zona IANA de quien lo crea. Opcional: si no viene se persiste el default
+    # de la columna. NO altera `vence_en` — el instante sale del offset del ISO.
+    zona_horaria: Optional[str] = None
 
 
 class NotaPatch(BaseModel):
@@ -54,6 +61,7 @@ class RecordatorioPatch(BaseModel):
     estado: Optional[Literal["cancelado"]] = None
     texto: Optional[str] = Field(default=None, min_length=1, max_length=500)
     vence_en: Optional[datetime] = None   # ISO con offset; se normaliza a UTC
+    zona_horaria: Optional[str] = None    # metadato; no reinterpreta vence_en
 
 
 class LogIn(BaseModel):
@@ -79,11 +87,34 @@ def _nota_dict(n: WorkspaceAssistantNote) -> dict:
     }
 
 
+def _zona_o_422(z: Optional[str]) -> Optional[str]:
+    """Zona IANA validada, o 422. Devuelve None cuando no la mandan, y entonces
+    manda el default de la columna.
+
+    Se valida en la puerta por el mismo motivo que el offset ausente: una zona
+    inventada guardada en silencio no da la cara hasta que alguien intenta
+    re-renderizar con ella, y para entonces ya no se sabe cuál era la buena.
+    ZoneInfo lanza ZoneInfoNotFoundError (que es un KeyError) si la clave no
+    existe, y ValueError si ni siquiera tiene forma de clave.
+    """
+    if z is None:
+        return None
+    z = z.strip()
+    if not z:
+        return None
+    try:
+        ZoneInfo(z)
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=422, detail=f"Zona horaria desconocida: {z!r}")
+    return z
+
+
 def _recordatorio_dict(r: WorkspaceAssistantReminder) -> dict:
     return {
         "id": r.id,
         "texto": r.texto,
         "vence_en": to_rfc3339_z(r.vence_en),
+        "zona_horaria": r.zona_horaria,
         "estado": r.estado,
         "notificado_en": to_rfc3339_z(r.notificado_en),
         "created_at": to_rfc3339_z(r.created_at),
@@ -192,6 +223,7 @@ async def crear_recordatorio(body: RecordatorioIn, authorization: Annotated[str,
     except ValueError as e:
         # Sin offset el recordatorio sonaría con la zona del servidor: no se silencia.
         raise HTTPException(status_code=422, detail=str(e))
+    zona = _zona_o_422(body.zona_horaria)
     r = WorkspaceAssistantReminder(
         usuario_id=user.id,
         texto=body.texto.strip(),
@@ -199,6 +231,10 @@ async def crear_recordatorio(body: RecordatorioIn, authorization: Annotated[str,
         estado="pendiente",
         created_at=utc_now(),
     )
+    # Sin zona no se fuerza nada: la columna trae su propio default, y así una
+    # fila creada por un cliente que no la manda queda igual que las de antes.
+    if zona:
+        r.zona_horaria = zona
     db.add(r)
     db.commit()
     db.refresh(r)
@@ -229,7 +265,10 @@ async def editar_recordatorio(
     """Cancelar o reprogramar. Van juntos porque son el mismo recurso y el mismo
     dueño; lo que cambia es qué campos llegan."""
     user = await _resolve_user(authorization, db)
-    if body.estado is None and body.texto is None and body.vence_en is None:
+    if (
+        body.estado is None and body.texto is None
+        and body.vence_en is None and body.zona_horaria is None
+    ):
         raise HTTPException(status_code=422, detail="No hay nada que cambiar")
     r = (
         db.query(WorkspaceAssistantReminder)
@@ -252,6 +291,14 @@ async def editar_recordatorio(
 
     if body.texto is not None:
         r.texto = body.texto.strip()
+
+    # Se reprograma desde otro huso: la hora nueva ya viene resuelta en `vence_en`,
+    # y esto solo deja constancia de con qué reloj se pidió. Va aparte de
+    # `vence_en` porque cambiar de zona sin mover la hora es un caso real —
+    # corregir el metadato de un recordatorio que se creó con la zona equivocada.
+    zona_nueva = _zona_o_422(body.zona_horaria)
+    if zona_nueva:
+        r.zona_horaria = zona_nueva
 
     if body.vence_en is not None:
         try:

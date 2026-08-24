@@ -1208,6 +1208,19 @@ class WorkspaceAssistantReminder(Base):
     usuario_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     texto = Column(String(500), nullable=False)
     vence_en = Column(DateTime(timezone=True), nullable=False)   # SIEMPRE UTC
+    # Zona IANA de quien creó el recordatorio ("Europe/Madrid"). Es un METADATO:
+    # sirve para volver a pintar la hora tal y como la pidió esa persona, y para
+    # auditar por qué un aviso sonó cuando sonó. `vence_en` sigue siendo el único
+    # dato que decide CUÁNDO, y sigue siendo siempre UTC.
+    # NO participa en el barrido del scheduler, y no es un olvido: ese barrido
+    # compara UTC contra UTC, y meter la zona en el filtro reintroduciría
+    # aritmética de husos justo donde hoy no hace falta ninguna.
+    # El default cubre a las filas anteriores a la columna y a los clientes que
+    # no la mandan: hasta que existió, todo el mundo estaba en esta zona.
+    zona_horaria = Column(
+        String(64), nullable=False,
+        default="America/Bogota", server_default="America/Bogota",
+    )
     estado = Column(
         Enum("pendiente", "notificado", "cancelado"),
         nullable=False, default="pendiente", server_default="pendiente",
