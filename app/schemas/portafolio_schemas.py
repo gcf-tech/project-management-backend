@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Dict
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -61,3 +61,17 @@ class PortafolioUpdate(BaseModel):
         populate_by_name=True,
         extra="ignore",
     )
+
+class RentabilidadYearOut(BaseModel):
+    """Un año con solo los meses que tienen valor: {1: 3.32, 3: -0.84, ...}.
+    El total del año no viaja: lo calcula el front."""
+    anio: int
+    meses: Dict[int, Decimal]
+ 
+ 
+class RentabilidadYearIn(BaseModel):
+    """Guarda un año completo. Envía los meses a fijar; un mes en null (o
+    ausente) borra ese mes (queda vacío = cuenta como 0)."""
+    meses: Dict[int, Optional[Decimal]]
+ 
+    model_config = ConfigDict(extra="ignore")

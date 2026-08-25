@@ -1271,3 +1271,24 @@ class WorkspaceAssistantLog(Base):
     __table_args__ = (
         Index("idx_ws_asst_log_usuario", "usuario_id", "created_at"),
     )
+
+class PortafolioRentabilidad(Base):
+    """Rentabilidad mensual de un portafolio: una fila por (portafolio, año, mes).
+    Un mes sin fila = sin dato = cuenta como 0 en el total del año. El total NO
+    se guarda: se calcula al vuelo (suma de los meses con valor)."""
+    __tablename__ = "portafolio_rentabilidad"
+ 
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    portafolio_id = Column(
+        Integer, ForeignKey("portafolios.id", ondelete="CASCADE"), nullable=False
+    )
+    anio = Column(Integer, nullable=False)
+    mes = Column(Integer, nullable=False)              # 1-12
+    valor = Column(DECIMAL(6, 2), nullable=False)      # % (admite negativos)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+ 
+    __table_args__ = (
+        Index("uq_portafolio_rentabilidad_cell", "portafolio_id", "anio", "mes", unique=True),
+        Index("idx_portafolio_rentabilidad_pa", "portafolio_id", "anio"),
+    )
