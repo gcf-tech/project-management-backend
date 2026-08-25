@@ -27,15 +27,18 @@ from pydantic import BaseModel
 from app.api.dependencies import get_db
 from app.core.config import NC_URL
 from app.core.security import get_nc_user_info
-from app.core.datetime_utils import utc_now, to_rfc3339_z, UTC
+from app.core.datetime_utils import utc_now, to_rfc3339_z, ensure_aware_utc, UTC
 from app.services.nextcloud_svc import sync_user_from_nextcloud
 from app.services.email_svc import send_email
 from app.db.models import (
     User, WorkspaceProfile, WorkspaceSession, WorkspaceDailyTime,
     WorkspaceActivity, WorkspaceTask, WorkspaceMessage, WorkspaceWorkstation,
     WorkspaceMeeting, WorkspaceMeetingParticipant, WorkspaceNews,
+    WorkspacePushSubscription,
     DeckCard, DeckCardAssignee, DeckColumn,
 )
+from app.core import config as _cfg
+from app.services.push import enviar_push, push_habilitado
 
 router = APIRouter()
 
@@ -46,6 +49,31 @@ BOGOTA = ZoneInfo("America/Bogota")
 
 def business_today() -> date:
     return datetime.now(BOGOTA).date()
+
+
+# Equipo del Deck → oficina del workspace (id de oficina, etiqueta visible).
+TEAM_OFICINA = {
+    "tech": ("tech", "Tecnología"),
+    "commercial": ("comm", "Comercial"),
+    "marketing": ("mkt", "Marketing"),
+    "finance": ("fin", "Finanzas"),
+    "admin": ("admin", "Administración"),
+    "operaciones": ("ops", "Operaciones"),
+    "criptox": ("crypto", "CryptoX"),
+    "cryptox": ("crypto", "CryptoX"),
+    "coordinación": ("ceo", "Dirección"),
+    "coordinacion": ("ceo", "Dirección"),
+}
+
+
+def _oficina_de(user):
+    """(id_oficina, etiqueta) según el equipo del usuario, o None."""
+    t = (user.team.name if getattr(user, "team", None) else "") or ""
+    return TEAM_OFICINA.get(t.lower().strip())
+
+
+# ids de oficina válidos (para validar el parámetro de los tableros por oficina)
+_OFICINA_IDS = {v[0] for v in TEAM_OFICINA.values()}
 
 
 # ============================================================
@@ -111,6 +139,14 @@ class ReunionIn(BaseModel):
     participantes: List[int] = []
 
 
+class ReunionPatch(BaseModel):
+    """Reprogramar o retitular. Los tres campos son opcionales y todos None se
+    rechaza con 422: un PATCH vacío no debe pasar por bueno."""
+    titulo: Optional[str] = None
+    inicio: Optional[datetime] = None   # ISO con offset; se normaliza a UTC
+    fin: Optional[datetime] = None
+
+
 # ============================================================
 # HELPERS
 # ============================================================
@@ -153,6 +189,8 @@ def _perfil_dict(u: User, p: Optional[WorkspaceProfile]) -> dict:
         "rendimiento": p.rendimiento if p else None,
         "estado": p.estado if p else None,
         "onboarded": bool(p.onboarded) if p else False,
+        "oficina": (_oficina_de(u) or (None, None))[0],        # id de su oficina (por equipo)
+        "oficina_label": (_oficina_de(u) or (None, None))[1],  # nombre de su oficina
     }
 
 
@@ -622,23 +660,106 @@ def _ical_esc(s: str) -> str:
     return str(s or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
 
-async def _crear_evento_caldav(authorization, nc_user_id, ev_uid, titulo, inicio, fin, descripcion=""):
-    """Best-effort: crea un VEVENT en el calendario 'personal' de Nextcloud del usuario."""
-    def fmt(dt):
-        return dt.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+def _fmt_ics(dt: datetime) -> str:
+    """Datetime → 'YYYYMMDDTHHMMSSZ'. Un naive se toma como UTC, la misma
+    convención de `to_rfc3339_z`: al reemitir el .ics los valores vienen de MySQL
+    y pueden llegar sin tzinfo, y asumir la zona del servidor movería el evento
+    cinco horas sin que nadie lo pidiera."""
+    aware = dt if dt.tzinfo is not None and dt.utcoffset() is not None else dt.replace(tzinfo=UTC)
+    return aware.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _url_evento_caldav(nc_user_id: str, ev_uid: str) -> str:
+    """URL del .ics en el calendario 'personal'. Vive en UN solo sitio porque el
+    borrado y la reemisión tienen que reconstruir EXACTAMENTE la URL que usó el
+    alta: el UID es determinista (`gcfws-{id}`), así que no hay nada que buscar,
+    pero solo mientras las tres la construyan igual.
+
+    `safe=""` y no el `safe="/"` por defecto: una barra sin escapar en el id de
+    usuario dejaría de ser un segmento del calendario propio para apuntar a otra
+    ruta del servidor DAV. Para un id normal no cambia nada."""
+    return (
+        f"{NC_URL}/remote.php/dav/calendars/"
+        f"{urllib.parse.quote(nc_user_id, safe='')}/personal/{urllib.parse.quote(ev_uid, safe='')}.ics"
+    )
+
+
+def _vevent_ics(ev_uid, titulo, inicio, fin, descripcion="", sequence=0) -> bytes:
     lines = [
         "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//GCF//Workspace//ES", "CALSCALE:GREGORIAN",
-        "BEGIN:VEVENT", f"UID:{ev_uid}@gcf-workspace", f"DTSTAMP:{fmt(utc_now())}",
-        f"DTSTART:{fmt(inicio)}", f"DTEND:{fmt(fin)}", f"SUMMARY:{_ical_esc(titulo)}",
+        "BEGIN:VEVENT", f"UID:{ev_uid}@gcf-workspace", f"DTSTAMP:{_fmt_ics(utc_now())}",
+        f"DTSTART:{_fmt_ics(inicio)}", f"DTEND:{_fmt_ics(fin)}", f"SUMMARY:{_ical_esc(titulo)}",
+        f"SEQUENCE:{int(sequence)}",
     ]
     if descripcion:
         lines.append(f"DESCRIPTION:{_ical_esc(descripcion)}")
     lines += ["END:VEVENT", "END:VCALENDAR"]
-    payload = ("\r\n".join(lines) + "\r\n").encode("utf-8")
-    url = f"{NC_URL}/remote.php/dav/calendars/{urllib.parse.quote(nc_user_id)}/personal/{urllib.parse.quote(ev_uid)}.ics"
+    return ("\r\n".join(lines) + "\r\n").encode("utf-8")
+
+
+async def _put_evento_caldav(authorization, nc_user_id, ev_uid, payload) -> bool:
     async with httpx.AsyncClient(timeout=20.0) as client:
-        r = await client.put(url, headers={"Authorization": authorization, "Content-Type": "text/calendar; charset=utf-8"}, content=payload)
+        r = await client.put(
+            _url_evento_caldav(nc_user_id, ev_uid),
+            headers={"Authorization": authorization, "Content-Type": "text/calendar; charset=utf-8"},
+            content=payload,
+        )
     return r.status_code in (200, 201, 204)
+
+
+async def _crear_evento_caldav(authorization, nc_user_id, ev_uid, titulo, inicio, fin, descripcion=""):
+    """Best-effort: crea un VEVENT en el calendario 'personal' de Nextcloud del usuario."""
+    payload = _vevent_ics(ev_uid, titulo, inicio, fin, descripcion, sequence=0)
+    return await _put_evento_caldav(authorization, nc_user_id, ev_uid, payload)
+
+
+async def _sequence_actual_caldav(authorization, nc_user_id, ev_uid) -> int:
+    """SEQUENCE del .ics que ya está en Nextcloud. iCalendar pide incrementarlo en
+    cada actualización, y no hay columna donde guardarlo (este cambio no trae
+    migración), así que se lee del propio recurso. Si no se puede leer → 0, que
+    solo arriesga que un cliente ignore la actualización, nunca que se pierda."""
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.get(
+                _url_evento_caldav(nc_user_id, ev_uid),
+                headers={"Authorization": authorization},
+            )
+        if r.status_code != 200:
+            return 0
+        m = re.search(r"^SEQUENCE:(\d+)", r.text, re.MULTILINE)
+        return int(m.group(1)) if m else 0
+    except Exception:
+        return 0
+
+
+async def _actualizar_evento_caldav(authorization, nc_user_id, ev_uid, titulo, inicio, fin, descripcion=""):
+    """Best-effort: reemite el .ics con los datos nuevos — mismo UID, DTSTAMP nuevo
+    y SEQUENCE+1, que es lo que iCalendar entiende por 'esto es una actualización'
+    y no por 'esto es otro evento'."""
+    seq = await _sequence_actual_caldav(authorization, nc_user_id, ev_uid) + 1
+    payload = _vevent_ics(ev_uid, titulo, inicio, fin, descripcion, sequence=seq)
+    return await _put_evento_caldav(authorization, nc_user_id, ev_uid, payload)
+
+
+async def _borrar_evento_caldav(authorization, nc_user_id, ev_uid) -> bool:
+    """Espejo del alta: borra el .ics que creó `_crear_evento_caldav`.
+
+    Un **404 es ÉXITO**: significa que la copia ya no está, que es exactamente lo
+    que se pedía. Tratarlo como fallo haría que cancelar dos veces la misma
+    reunión reportara un problema inventado.
+
+    Nunca lanza — devuelve en qué acabó. Quien llama lo reporta en vez de
+    tragárselo: tragarse este fallo en silencio es lo que dejó eventos fantasma
+    en el drawer de Calendario sin fila en MySQL que los explicara."""
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.delete(
+                _url_evento_caldav(nc_user_id, ev_uid),
+                headers={"Authorization": authorization},
+            )
+    except Exception:
+        return False
+    return r.status_code in (200, 202, 204, 404)
 
 
 @router.post("/reuniones")
@@ -662,7 +783,12 @@ async def crear_reunion(body: ReunionIn, authorization: Annotated[str, Header()]
     db.commit()
     db.refresh(m)
 
-    # también crear el evento en el calendario Nextcloud del organizador (best-effort)
+    # También el evento en el calendario Nextcloud del organizador (best-effort).
+    # SOLO el del organizador, a propósito: a los invitados el evento les llega por
+    # la invitación de Google, que es la que sabe de asistentes, respuestas y Meet.
+    # Escribirles además por CalDAV les dejaría DOS eventos para la misma reunión,
+    # uno de ellos sin poder responder. El borrado y la reemisión son espejo de
+    # esto y tocan exactamente la misma copia, ni una más.
     try:
         fin_dt = body.fin or (body.inicio + timedelta(hours=1))
         desc = ("Reunión de GCF Workspace. " + (body.meetUrl or "")).strip()
@@ -743,6 +869,195 @@ async def reuniones_historial(authorization: Annotated[str, Header()], dias: int
         }
         for m in rows
     ]
+
+
+# ---- Cancelar y editar una reunión ---------------------------------------
+# Un id en la ruta NO autoriza nada: las tres rutas de abajo resuelven al usuario
+# del token y comprueban en el SERVIDOR qué puede hacer con esa reunión.
+# Se distinguen dos negativas porque significan cosas distintas:
+#   404 → esa reunión no existe PARA TI (ni la creaste ni te invitaron). No se
+#         confirma que exista para otro: un id ajeno no debe poder sondearse.
+#   403 → existe y la ves porque te invitaron, pero no la creaste, así que no
+#         puedes cancelarla ni moverla. Devolver 404 aquí sería mentir sobre algo
+#         que la persona sí tiene en su panel.
+
+def _reunion_de(db: Session, meeting_id: int, user: User):
+    """(reunión, es_participante) de una reunión que el usuario puede VER.
+    Devuelve (None, False) si no existe o no es suya en ningún sentido."""
+    m = db.query(WorkspaceMeeting).filter(WorkspaceMeeting.id == meeting_id).first()
+    if not m:
+        return None, False
+    es_part = (
+        db.query(WorkspaceMeetingParticipant)
+        .filter(
+            WorkspaceMeetingParticipant.meeting_id == meeting_id,
+            WorkspaceMeetingParticipant.user_id == user.id,
+        )
+        .first()
+        is not None
+    )
+    if not es_part and m.creador_id != user.id:
+        return None, False
+    return m, es_part
+
+
+def _reunion_dict(db: Session, m: WorkspaceMeeting, user: User) -> dict:
+    """Forma completa de UNA reunión. Incluye los CORREOS de los participantes
+    porque quien va a cancelar necesita ver a quién le va a llegar el aviso; es
+    el último punto donde se detecta que la reunión no era la que se creía."""
+    correos = [
+        e for (e,) in db.query(User.email)
+        .join(WorkspaceMeetingParticipant, WorkspaceMeetingParticipant.user_id == User.id)
+        .filter(WorkspaceMeetingParticipant.meeting_id == m.id)
+        .all()
+        if e
+    ]
+    return {
+        "id": m.id,
+        "titulo": m.titulo,
+        "meetUrl": m.meet_url,
+        "inicio": to_rfc3339_z(m.inicio),
+        "fin": to_rfc3339_z(m.fin),
+        "esCreador": m.creador_id == user.id,
+        "invitados": sorted(correos),
+    }
+
+
+@router.get("/reuniones/proximas")
+async def reuniones_proximas(
+    authorization: Annotated[str, Header()],
+    dias: int = 30,
+    db: Session = Depends(get_db),
+):
+    """Reuniones del usuario de HOY en adelante. No existía: /reuniones/hoy y
+    /reuniones/historial dejaban un hueco donde justamente cae "cancela la
+    reunión de mañana", que es sobre lo que el asistente tiene que actuar."""
+    user = await _resolve_user(authorization, db)
+    dias = max(1, min(dias, 365))
+    hoy = business_today()
+    desde = datetime.combine(hoy, dtime.min, tzinfo=BOGOTA).astimezone(UTC)
+    hasta = datetime.combine(hoy + timedelta(days=dias), dtime.max, tzinfo=BOGOTA).astimezone(UTC)
+    rows = (
+        db.query(WorkspaceMeeting)
+        .join(WorkspaceMeetingParticipant, WorkspaceMeetingParticipant.meeting_id == WorkspaceMeeting.id)
+        .filter(
+            WorkspaceMeetingParticipant.user_id == user.id,   # filtro en el SERVIDOR
+            WorkspaceMeeting.inicio >= desde,
+            WorkspaceMeeting.inicio <= hasta,
+        )
+        .order_by(WorkspaceMeeting.inicio.asc())
+        .limit(50)
+        .all()
+    )
+    return [_reunion_dict(db, m, user) for m in rows]
+
+
+@router.get("/reuniones/{meeting_id}")
+async def reunion_detalle(
+    meeting_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Una reunión concreta. La declara DESPUÉS de /hoy, /historial y /proximas
+    a propósito: FastAPI resuelve por orden y {meeting_id} se tragaría "hoy"."""
+    user = await _resolve_user(authorization, db)
+    m, _ = _reunion_de(db, meeting_id, user)
+    if not m:
+        raise HTTPException(status_code=404, detail="Reunión no encontrada")
+    return _reunion_dict(db, m, user)
+
+
+@router.delete("/reuniones/{meeting_id}")
+async def borrar_reunion(
+    meeting_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Cancela la reunión borrando la fila (los participantes caen por CASCADE).
+    Devuelve la reunión tal como estaba: quien llama necesita `meetUrl` e
+    `inicio` para cancelar también el evento de Google, y leerlos de aquí evita
+    confiar en los que mande el cliente.
+
+    Borra ADEMÁS la copia CalDAV que creó `POST /reuniones`. El alta escribe en
+    dos sitios (MySQL + un .ics en Nextcloud) y durante un tiempo la baja borró
+    solo en uno: el evento sobrevivía en el drawer de Calendario sin ninguna fila
+    que lo explicara. `caldav_borrado` dice si esta vez se limpió."""
+    user = await _resolve_user(authorization, db)
+    m, es_part = _reunion_de(db, meeting_id, user)
+    if not m:
+        raise HTTPException(status_code=404, detail="Reunión no encontrada")
+    if m.creador_id != user.id:
+        raise HTTPException(status_code=403, detail="Solo quien creó la reunión puede cancelarla")
+    datos = _reunion_dict(db, m, user)
+    # CalDAV va ANTES que MySQL. Si Nextcloud falla, la reunión sigue existiendo y
+    # se puede reintentar; al revés quedaría la copia huérfana y ya sin fila desde
+    # la que reintentar nada. Best-effort igual que el alta: no tumba la
+    # cancelación, pero a diferencia del alta el resultado SÍ se reporta.
+    caldav_borrado = await _borrar_evento_caldav(authorization, user.nc_user_id, f"gcfws-{m.id}")
+    db.delete(m)
+    db.commit()
+    return {"ok": True, "reunion": datos, "caldav_borrado": caldav_borrado}
+
+
+@router.patch("/reuniones/{meeting_id}")
+async def editar_reunion(
+    meeting_id: int,
+    body: ReunionPatch,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Cambia título y/o horario. Solo el creador: mover la hora le cambia el día
+    a todos los invitados.
+
+    Reemite además el .ics de Nextcloud. Es la misma asimetría que tenía el
+    borrado —el alta escribe en dos sitios y la edición actualizaba uno— pero
+    estaba tapada: el evento fantasma que dejaba la cancelación se notaba antes
+    que un evento con la hora vieja."""
+    user = await _resolve_user(authorization, db)
+    m, _ = _reunion_de(db, meeting_id, user)
+    if not m:
+        raise HTTPException(status_code=404, detail="Reunión no encontrada")
+    if m.creador_id != user.id:
+        raise HTTPException(status_code=403, detail="Solo quien creó la reunión puede editarla")
+
+    if body.titulo is None and body.inicio is None and body.fin is None:
+        raise HTTPException(status_code=422, detail="No hay nada que cambiar")
+
+    if body.titulo is not None:
+        m.titulo = body.titulo.strip()[:255]
+    try:
+        # Sin offset, la hora nueva se guardaría con la zona del servidor y la
+        # reunión se movería cinco horas sin que nadie lo pidiera.
+        if body.inicio is not None:
+            m.inicio = ensure_aware_utc(body.inicio)
+        if body.fin is not None:
+            m.fin = ensure_aware_utc(body.fin)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    # Un fin anterior al inicio deja la reunión "terminada" antes de empezar y el
+    # panel la pinta en gris para siempre: se rechaza en vez de guardarla rota.
+    if m.fin is not None and m.fin <= m.inicio:
+        raise HTTPException(status_code=422, detail="El fin debe ser posterior al inicio")
+
+    db.commit()
+    db.refresh(m)
+
+    # Mismos valores que usó el alta, recalculados desde la fila ya guardada: un
+    # `fin` nulo son 60 min, y la descripción vuelve a llevar el enlace de Meet.
+    caldav_actualizado = False
+    try:
+        fin_dt = m.fin or (m.inicio + timedelta(hours=1))
+        desc = ("Reunión de GCF Workspace. " + (m.meet_url or "")).strip()
+        caldav_actualizado = await _actualizar_evento_caldav(
+            authorization, user.nc_user_id, f"gcfws-{m.id}",
+            m.titulo or "Reunión", m.inicio, fin_dt, desc,
+        )
+    except Exception:
+        pass
+
+    salida = _reunion_dict(db, m, user)
+    salida["caldav_actualizado"] = caldav_actualizado
+    return salida
 
 
 # ============================================================
@@ -830,6 +1145,7 @@ _TALK = f"{NC_URL}/ocs/v2.php/apps/spreed"
 
 class MensajeTalkIn(BaseModel):
     message: str
+    replyTo: Optional[int] = None
 
 
 class OneToOneIn(BaseModel):
@@ -870,8 +1186,10 @@ async def talk_rooms(authorization: Annotated[str, Header()]):
             "unread": r.get("unreadMessages", 0),
             "lastActivity": r.get("lastActivity"),
             "lastMessage": (lm or {}).get("message") if isinstance(lm, dict) else None,
+            "isFavorite": bool(r.get("isFavorite")),  # marcada como favorita en Talk
         })
-    rooms.sort(key=lambda x: x.get("lastActivity") or 0, reverse=True)
+    # favoritas primero, luego por actividad reciente
+    rooms.sort(key=lambda x: (x.get("isFavorite"), x.get("lastActivity") or 0), reverse=True)
     return rooms
 
 
@@ -918,23 +1236,102 @@ async def talk_messages(token: str, authorization: Annotated[str, Header()], las
                 "link": f.get("link"),
             }
             text = f"📎 {f['name']}"  # fallback textual
+        parent = None
+        par = m.get("parent")
+        if isinstance(par, dict) and par.get("id"):
+            ptext = par.get("message")
+            pparams = par.get("messageParameters") or {}
+            pf = pparams.get("file") if isinstance(pparams, dict) else None
+            if isinstance(pf, dict) and pf.get("name"):
+                ptext = f"📎 {pf['name']}"
+            parent = {
+                "id": par.get("id"),
+                "message": ptext,
+                "actorName": par.get("actorDisplayName"),
+            }
         msgs.append({
             "id": m.get("id"),
             "actorId": m.get("actorId"),
             "actorName": m.get("actorDisplayName"),
             "message": text,
             "file": file_info,
+            "parent": parent,                                # mensaje al que responde (si aplica)
+            "reactions": m.get("reactions") or {},          # {emoji: conteo}
+            "reactionsSelf": m.get("reactionsSelf") or [],  # emojis que YO puse
             "timestamp": m.get("timestamp"),
         })
     msgs.sort(key=lambda x: x["id"] or 0)  # id monotónico → orden cronológico
     return msgs
 
 
+@router.get("/talk/rooms/{token}/read-status")
+async def talk_read_status(token: str, authorization: Annotated[str, Header()]):
+    """Estado de lectura de la conversación:
+    - lastCommonRead: último mensaje leído por TODOS (para marcar mis mensajes como ✓✓).
+    - lastRead: último mensaje que YO he leído."""
+    data = await _talk("GET", f"/api/v4/room/{token}", authorization)
+    d = data or {}
+    return {
+        "lastCommonRead": d.get("lastCommonReadMessage") or 0,
+        "lastRead": d.get("lastReadMessage") or 0,
+    }
+
+
 @router.post("/talk/rooms/{token}/messages")
 async def talk_send(token: str, body: MensajeTalkIn, authorization: Annotated[str, Header()]):
-    """Envía un mensaje a una conversación."""
-    data = await _talk("POST", f"/api/v1/chat/{token}", authorization, data={"message": body.message})
-    return {"id": (data or {}).get("id")}
+    """Envía un mensaje a una conversación (opcionalmente como respuesta a otro)."""
+    data = {"message": body.message}
+    if body.replyTo:
+        data["replyTo"] = body.replyTo
+    resp = await _talk("POST", f"/api/v1/chat/{token}", authorization, data=data)
+    return {"id": (resp or {}).get("id")}
+
+
+class EditarMsgIn(BaseModel):
+    message: str
+
+
+@router.put("/talk/rooms/{token}/messages/{message_id}")
+async def talk_edit(token: str, message_id: int, body: EditarMsgIn, authorization: Annotated[str, Header()]):
+    """Edita un mensaje propio (Talk permite editar dentro de una ventana de tiempo)."""
+    texto = (body.message or "").strip()
+    if not texto:
+        raise HTTPException(status_code=400, detail="Mensaje vacío")
+    await _talk("PUT", f"/api/v1/chat/{token}/{message_id}", authorization, data={"message": texto})
+    return {"ok": True}
+
+
+@router.delete("/talk/rooms/{token}/messages/{message_id}")
+async def talk_delete(token: str, message_id: int, authorization: Annotated[str, Header()]):
+    """Borra un mensaje. Talk lo convierte en 'mensaje eliminado' (systemMessage), que
+    nuestra lista ya omite → el mensaje desaparece para todos. Solo el autor (o un
+    moderador) puede borrar dentro de la ventana permitida; si no, Talk responde 403/405."""
+    await _talk("DELETE", f"/api/v1/chat/{token}/{message_id}", authorization)
+    return {"ok": True}
+
+
+class ReaccionIn(BaseModel):
+    reaction: str
+
+
+@router.post("/talk/rooms/{token}/messages/{message_id}/reaction")
+async def talk_react(token: str, message_id: int, body: ReaccionIn, authorization: Annotated[str, Header()]):
+    """Agrega una reacción (emoji) a un mensaje de Talk."""
+    emoji = (body.reaction or "").strip()
+    if not emoji:
+        raise HTTPException(status_code=400, detail="Reacción vacía")
+    await _talk("POST", f"/api/v1/reaction/{token}/{message_id}", authorization, data={"reaction": emoji})
+    return {"ok": True}
+
+
+@router.delete("/talk/rooms/{token}/messages/{message_id}/reaction")
+async def talk_unreact(token: str, message_id: int, reaction: str, authorization: Annotated[str, Header()]):
+    """Quita una reacción (emoji) que YO puse en un mensaje de Talk."""
+    emoji = (reaction or "").strip()
+    if not emoji:
+        raise HTTPException(status_code=400, detail="Reacción vacía")
+    await _talk("DELETE", f"/api/v1/reaction/{token}/{message_id}", authorization, params={"reaction": emoji})
+    return {"ok": True}
 
 
 def _safe_name(name: Optional[str]) -> str:
@@ -1018,6 +1415,58 @@ async def talk_avatar(token: str, authorization: Annotated[str, Header()]):
 
 
 # ============================================================
+# PRESENCIA DE NEXTCLOUD — quién está conectado en NC (Talk/Calendar/etc.)
+#  Sirve para mostrar su "presencia fantasma" en el mundo del workspace.
+# ============================================================
+
+@router.get("/nextcloud-online")
+async def nextcloud_online(authorization: Annotated[str, Header()], db: Session = Depends(get_db)):
+    """Usuarios del workspace conectados en Nextcloud (según la User Status API).
+    status ∈ {online, away, dnd} se considera 'presente'. Incluye departamento y
+    avatar para pintar su muñequito fantasma."""
+    await _resolve_user(authorization, db)  # requiere sesión válida
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                f"{NC_URL}/ocs/v2.php/apps/user_status/api/v1/statuses",
+                headers={"Authorization": authorization, "OCS-APIRequest": "true", "Accept": "application/json"},
+                params={"limit": 200},
+            )
+    except Exception:
+        return []
+    if resp.status_code != 200:
+        return []
+    try:
+        data = (resp.json().get("ocs") or {}).get("data") or []
+    except Exception:
+        return []
+    estado = {}
+    for s in data:
+        uid = s.get("userId")
+        if uid:
+            estado[uid] = (s.get("status") or "").lower()
+    presentes = {"online", "away", "dnd"}
+    users = db.query(User).filter(User.is_active.is_(True)).all()
+    profs = {p.user_id: p for p in db.query(WorkspaceProfile).all()}
+    out = []
+    for u in users:
+        st = estado.get(u.nc_user_id)
+        if st in presentes:
+            prof = profs.get(u.id)
+            out.append({
+                "id": u.id,
+                "ncid": u.nc_user_id,
+                "name": u.display_name,
+                "role": u.job_title,
+                "status": st,
+                "team": (u.team.name if u.team else None),        # equipo del Deck (fuente fiable)
+                "departamento": (prof.departamento if prof else None),  # onboarding workspace (opcional)
+                "avatar": (prof.avatar if prof else None),
+            })
+    return out
+
+
+# ============================================================
 # NEWS — tablero de novedades del Holding
 #  Notas de colaboradores, avisos empresariales, cumpleaños, etc.
 # ============================================================
@@ -1027,6 +1476,7 @@ class NewsIn(BaseModel):
     titulo: Optional[str] = None
     tipo: Optional[str] = "nota"  # nota | empresa | cumple | evento
     imagen_url: Optional[str] = None
+    scope: Optional[str] = "general"  # "general" (Holding) | "oficina" (mi oficina)
 
 
 _NEWS_TIPOS = {"nota", "empresa", "cumple", "evento"}
@@ -1040,6 +1490,7 @@ def _news_dict(n: WorkspaceNews) -> dict:
         "titulo": n.titulo,
         "cuerpo": n.cuerpo,
         "imagen_url": n.imagen_url,
+        "oficina": n.oficina,
         "fijado": bool(n.fijado),
         "created_at": to_rfc3339_z(n.created_at),
         "autor_id": n.autor_id,
@@ -1052,17 +1503,27 @@ def _news_dict(n: WorkspaceNews) -> dict:
 async def listar_news(
     authorization: Annotated[str, Header()],
     limit: int = 30,
+    scope: str = "general",   # "general" (Holding) | "oficina"
+    oficina: Optional[str] = None,  # id de oficina explícito (tablero de esa oficina); si no, la del usuario
     db: Session = Depends(get_db),
 ):
-    """Últimas novedades: primero las fijadas, luego por fecha descendente."""
-    await _resolve_user(authorization, db)  # requiere sesión válida
+    """Novedades: primero fijadas, luego por fecha desc. scope filtra general vs oficina.
+    Con scope=oficina se puede pedir una oficina concreta (los tableros de cada oficina),
+    o la del usuario si no se especifica."""
+    user = await _resolve_user(authorization, db)
     limit = max(1, min(limit, 100))
-    rows = (
-        db.query(WorkspaceNews)
-        .order_by(WorkspaceNews.fijado.desc(), WorkspaceNews.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    q = db.query(WorkspaceNews)
+    if scope == "oficina":
+        ofi_id = oficina if (oficina and oficina in _OFICINA_IDS) else None
+        if not ofi_id:
+            ofi = _oficina_de(user)
+            if not ofi:
+                return []
+            ofi_id = ofi[0]
+        q = q.filter(WorkspaceNews.oficina == ofi_id)
+    else:
+        q = q.filter(WorkspaceNews.oficina.is_(None))
+    rows = q.order_by(WorkspaceNews.fijado.desc(), WorkspaceNews.created_at.desc()).limit(limit).all()
     return [_news_dict(n) for n in rows]
 
 
@@ -1087,11 +1548,19 @@ async def crear_news(
     # Solo un gerente/admin puede publicar avisos "empresa" (comunicados oficiales).
     if tipo == "empresa" and not _is_manager(user):
         tipo = "nota"
+    # ámbito: general (Holding) o la oficina del usuario
+    oficina = None
+    if (body.scope or "general") == "oficina":
+        ofi = _oficina_de(user)
+        if not ofi:
+            raise HTTPException(status_code=400, detail="No tienes una oficina asignada")
+        oficina = ofi[0]
     n = WorkspaceNews(
         tipo=tipo,
         titulo=(body.titulo or "").strip() or None,
         cuerpo=cuerpo[:4000],
         imagen_url=imagen_url,
+        oficina=oficina,
         autor_id=user.id,
         created_at=utc_now(),
     )
@@ -1162,3 +1631,93 @@ async def borrar_news(
     db.delete(n)
     db.commit()
     return {"ok": True}
+
+
+# ============================================================
+# WEB PUSH (PWA) — notificaciones nativas al celular
+# ============================================================
+class PushSubIn(BaseModel):
+    endpoint: str
+    keys: dict = {}
+
+
+@router.get("/push/key")
+async def push_key():
+    """Clave pública VAPID para que el navegador se suscriba. Vacía = push apagado."""
+    return {"publicKey": _cfg.VAPID_PUBLIC_KEY if push_habilitado() else ""}
+
+
+@router.post("/push/subscribe")
+async def push_subscribe(
+    body: PushSubIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Guarda (o actualiza) la suscripción Web Push del navegador del usuario."""
+    user = await _resolve_user(authorization, db)
+    endpoint = (body.endpoint or "").strip()
+    p256dh = (body.keys or {}).get("p256dh")
+    auth = (body.keys or {}).get("auth")
+    if not endpoint or not p256dh or not auth:
+        raise HTTPException(status_code=400, detail="Suscripción incompleta")
+    sub = db.query(WorkspacePushSubscription).filter(
+        WorkspacePushSubscription.endpoint == endpoint).first()
+    if sub:
+        sub.user_id = user.id
+        sub.p256dh = p256dh
+        sub.auth = auth
+    else:
+        db.add(WorkspacePushSubscription(
+            user_id=user.id, endpoint=endpoint, p256dh=p256dh, auth=auth))
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/push/subscribe")
+async def push_unsubscribe(
+    body: PushSubIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Elimina una suscripción (cuando el navegador la revoca)."""
+    await _resolve_user(authorization, db)
+    endpoint = (body.endpoint or "").strip()
+    if endpoint:
+        db.query(WorkspacePushSubscription).filter(
+            WorkspacePushSubscription.endpoint == endpoint).delete()
+        db.commit()
+    return {"ok": True}
+
+
+@router.post("/push/test")
+async def push_test(
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Envía un push de prueba al propio usuario (para verificar la config)."""
+    user = await _resolve_user(authorization, db)
+    n = enviar_push(db, user.id, "GCF Workspace",
+                    "🔔 Notificaciones activadas correctamente.", url="/", tag="gcf-test")
+    return {"enviados": n, "habilitado": push_habilitado()}
+
+
+class PushNotifyIn(BaseModel):
+    userId: int
+    title: str
+    body: str = ""
+    url: str = "/"
+    tag: str = "gcf-workspace"
+
+
+@router.post("/push/notify")
+async def push_notify(
+    body: PushNotifyIn,
+    db: Session = Depends(get_db),
+    x_push_secret: Annotated[str | None, Header()] = None,
+):
+    """Puente servidor-a-servidor: el Node del workspace pide un push para un
+    usuario (llamada/nudge/reunión cuando NO está conectado). Protegido por secreto."""
+    if not _cfg.PUSH_BRIDGE_SECRET or x_push_secret != _cfg.PUSH_BRIDGE_SECRET:
+        raise HTTPException(status_code=403, detail="No autorizado")
+    n = enviar_push(db, body.userId, body.title, body.body, url=body.url, tag=body.tag)
+    return {"enviados": n}

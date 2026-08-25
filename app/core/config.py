@@ -6,6 +6,15 @@ load_dotenv()
 
 NC_URL = os.getenv("NC_URL", "https://portaltest.gcf.group")
 
+# Web Push (PWA del workspace) — claves VAPID. Sin ellas el push queda desactivado
+# (el frontend simplemente no ofrece notificaciones nativas).
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "")
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
+VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "mailto:tech@gcf.group")
+# Secreto compartido con el servidor Node del workspace: le permite pedir un push
+# (p. ej. "te están llamando") cuando el destinatario NO está conectado.
+PUSH_BRIDGE_SECRET = os.getenv("PUSH_BRIDGE_SECRET", "")
+
 # Legacy single client (for backward compatibility)
 OAUTH_CLIENT_ID = os.getenv("NC_OAUTH_CLIENT_ID", "")
 OAUTH_CLIENT_SECRET = os.getenv("NC_OAUTH_CLIENT_SECRET", "")
@@ -95,3 +104,8 @@ SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "GCF Deck")
 DECK_APP_URL = os.getenv("DECK_APP_URL", "https://deck.gcf.group/app/")
 # El email se envía solo si hay credenciales configuradas.
 EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASSWORD)
+
+# Google Cloud Translation API (v2, con API key). Para el botón "Traducir" de los
+# comentarios. Crear una API key en GCP restringida a "Cloud Translation API".
+GOOGLE_TRANSLATE_API_KEY = os.getenv("GOOGLE_TRANSLATE_API_KEY", "")
+TRANSLATE_ENABLED = bool(GOOGLE_TRANSLATE_API_KEY)

@@ -126,11 +126,15 @@ class CardIn(BaseModel):
     clientOpId: Optional[str] = None
 
 
+CARD_STATUSES = ("not_started", "in_progress", "paused", "done", "cancelled")
+
+
 class CardPatch(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     projectId: Optional[int] = None
     priority: Optional[str] = None
+    status: Optional[str] = None
     startDate: Optional[str] = None
     dueDate: Optional[str] = None
     prototypeUrl: Optional[str] = None
@@ -258,7 +262,10 @@ class DeckContext:
             return True
         if card.owner_team_id in self.team_ids:
             return True
-        return any(st.team_id in self.team_ids for st in card.shared_teams)
+        if any(st.team_id in self.team_ids for st in card.shared_teams):
+            return True
+        # Soy follower de la card (aunque sea de otro tablero): puedo verla.
+        return any(f.user_id == self.user.id for f in card.followers)
 
     def can_write_card(self, card: DeckCard) -> bool:
         return self.is_admin() or self.can_see_card(card)
@@ -291,11 +298,18 @@ def _build_deck_context(db: Session, user: User) -> DeckContext:
             .join(DeckCardTeam, DeckCardTeam.card_id == DeckCard.id)
             .filter(DeckCardTeam.team_id.in_(team_ids)).distinct().all()
         }
+    # Tableros ajenos donde sigo alguna card (follow personal): dan ACCESO para
+    # abrir esa card y cargar sus etapas/miembros en el drawer.
+    followed = {
+        row[0] for row in db.query(DeckCard.board_id)
+        .join(DeckCardFollower, DeckCardFollower.card_id == DeckCard.id)
+        .filter(DeckCardFollower.user_id == user.id).distinct().all()
+    }
     # leader y member comparten visibilidad de tableros; el leader solo se
-    # distingue por el acceso a la analítica de su equipo. `own | shared` da
-    # ACCESO (para abrir cards compartidas y sus etapas), pero solo `own` sale
-    # en el selector y ve el tablero completo; en los ajenos, solo lo compartido.
-    return DeckContext(user, role, team_ids, own | shared, own)
+    # distingue por el acceso a la analítica de su equipo. `own | shared | followed`
+    # da ACCESO (abrir cards compartidas/seguidas y sus etapas), pero solo `own`
+    # sale en el selector y ve el tablero completo; en los ajenos, solo lo permitido.
+    return DeckContext(user, role, team_ids, own | shared | followed, own)
 
 
 def _get_board_or_404(db: Session, board_id: int) -> DeckBoard:
@@ -363,6 +377,80 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
     except ValueError:
         # plain date → end of day not assumed; midnight UTC
         return datetime.fromisoformat(value[:10] + "T00:00:00+00:00")
+
+
+def _recompute_parent_due(db: Session, parent_id: Optional[int], _seen=None):
+    """Sincroniza la fecha de vencimiento de una tarea con sus subtareas.
+
+    Regla: si la tarea tiene subtareas con fecha, su vencimiento SIEMPRE pasa a
+    ser el MÁS LEJANO de esas subtareas (aunque el padre ya tuviera una fecha).
+    Si ninguna subtarea tiene fecha: se limpia la que estaba autoderivada; una
+    fecha manual se respeta. Burbujea hacia arriba por si el padre es subtarea.
+    """
+    if not parent_id:
+        return
+    _seen = _seen or set()
+    if parent_id in _seen:            # anti-ciclo (por seguridad)
+        return
+    _seen.add(parent_id)
+    parent = db.query(DeckCard).filter(DeckCard.id == parent_id).first()
+    if not parent:
+        return
+    rows = db.query(DeckCard.due_date).filter(
+        DeckCard.parent_card_id == parent.id,
+        DeckCard.archived.is_(False),
+        DeckCard.due_date.isnot(None),
+    ).all()
+    dues = [r[0] for r in rows if r[0] is not None]
+    if dues:
+        new_due = max(dues, key=lambda d: _as_utc(d))
+        if new_due != parent.due_date:
+            parent.due_date = new_due
+            parent.updated_at = utc_now()
+        parent.due_auto = True
+    else:
+        # Sin fechas en subtareas: solo se limpia si venía autoderivada.
+        if parent.due_auto and parent.due_date is not None:
+            parent.due_date = None
+            parent.updated_at = utc_now()
+        parent.due_auto = False
+    if parent.parent_card_id:
+        _recompute_parent_due(db, parent.parent_card_id, _seen)
+
+
+def _start_parent_chain(db: Session, parent_id: Optional[int], user, _seen=None):
+    """Al iniciar (sacar de 'Creación') una subtarea, inicia también a su tarea
+    padre: la mueve fuera de la primera etapa y le pone estado 'in_progress'.
+    Burbujea hacia arriba por si el padre es a su vez subtarea."""
+    _seen = _seen or set()
+    if not parent_id or parent_id in _seen:
+        return
+    _seen.add(parent_id)
+    parent = db.query(DeckCard).filter(DeckCard.id == parent_id).first()
+    if not parent:
+        return
+    cols = db.query(DeckColumn).filter(
+        DeckColumn.board_id == parent.board_id).order_by(DeckColumn.position).all()
+    if not cols:
+        return
+    first_id = cols[0].id
+    moved = False
+    if parent.column_id == first_id and len(cols) > 1:
+        target = cols[1]
+        from_col = parent.column_id
+        parent.column_id = target.id
+        parent.position = _next_position(db, DeckCard, column_id=target.id)
+        moved = True
+        _log_activity(db, parent, user, "moved",
+                      payload={"from": from_col, "to": target.id},
+                      message=f"Iniciada automáticamente al iniciar una subtarea", notify=False)
+    if parent.status == "not_started":
+        parent.status = "in_progress"
+        moved = True
+    if moved:
+        parent.updated_at = utc_now()
+    if parent.parent_card_id:
+        _start_parent_chain(db, parent.parent_card_id, user, _seen)
 
 
 EDIT_WINDOW = timedelta(minutes=5)
@@ -451,8 +539,10 @@ def _serialize_card(card: DeckCard, *, full=False, sub=None) -> Dict[str, Any]:
         "listOrder": card.list_order,
         "position": card.position,
         "priority": card.priority,
+        "status": card.status or "not_started",
         "startDate": card.start_date.isoformat() if card.start_date else None,
         "dueDate": card.due_date.isoformat() if card.due_date else None,
+        "dueAuto": bool(card.due_auto),
         "completedAt": card.completed_at.isoformat() if card.completed_at else None,
         "archived": bool(card.archived),
         "assignees": [_user_brief(a.user) for a in card.assignees],
@@ -513,12 +603,14 @@ def _subtask_rollup(db: Session, card_ids: List[int]) -> Dict[int, Dict[str, int
 
 
 def _serialize_attachment(a: DeckAttachment) -> Dict[str, Any]:
+    ct = a.content_type or ""
     return {
         "id": a.id,
         "filename": a.filename,
         "contentType": a.content_type,
         "size": a.size,
-        "isImage": bool(a.content_type and a.content_type.startswith("image/")),
+        "isImage": ct.startswith("image/"),
+        "isPdf": ct == "application/pdf" or (a.filename or "").lower().endswith(".pdf"),
         "url": f"/api/decks/attachments/{a.id}",
     }
 
@@ -786,6 +878,30 @@ SUPPORTED_LANGS = ("es", "en")
 
 class LanguageIn(BaseModel):
     lang: str
+
+
+class TranslateIn(BaseModel):
+    text: str
+    targetLang: Optional[str] = None       # por defecto el idioma del usuario
+    format: Optional[str] = None           # 'html' | 'text'
+
+
+@router.post("/translate")
+async def translate_text(
+    body: TranslateIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Traduce un texto (p. ej. un comentario) al idioma del usuario. Best-effort:
+    si el proveedor está deshabilitado devuelve enabled=false."""
+    user = await _get_current_user(authorization, db)
+    from app.services import translate_svc
+    target = (body.targetLang or user.lang or "es")
+    res = await translate_svc.translate(body.text or "", target, fmt=body.format or "text")
+    if res is None:
+        from app.core import config as _cfg
+        return {"enabled": _cfg.TRANSLATE_ENABLED, "text": None, "detected": None}
+    return {"enabled": True, "text": res["text"], "detected": res["detected"], "target": target.split("-")[0].lower()}
 
 
 @router.patch("/me/language")
@@ -1300,6 +1416,7 @@ async def create_subtask(
     db.flush()
     db.refresh(card)
     _log_activity(db, card, user, "created", message=f"{user.display_name} creó esta subtarea", notify=False)
+    _recompute_parent_due(db, parent.id)
     db.commit()
     db.refresh(card)
     return _serialize_subtask(card)
@@ -1364,6 +1481,7 @@ async def create_subtasks_bulk(
         _log_activity(db, card, user, "created", message=f"{user.display_name} creó esta subtarea", notify=False)
         created.append(card)
 
+    _recompute_parent_due(db, parent.id)
     db.commit()
     for c in created:
         db.refresh(c)
@@ -1478,7 +1596,10 @@ async def patch_card(
         if new_proto != card.prototype_url:
             changed_fields.append("prototipo")
         card.prototype_url = new_proto
-    if body.startDate is not None:
+    # Nota: usamos model_fields_set (no `is not None`) para poder DISTINGUIR
+    # "no enviado" de "enviado en null" y así permitir BORRAR la fecha.
+    fields_set = body.model_fields_set
+    if "startDate" in fields_set:
         _gate("dates")
         new_start = _parse_dt(body.startDate)
         if new_start != card.start_date:
@@ -1486,16 +1607,40 @@ async def patch_card(
                           payload={"to": new_start.isoformat() if new_start else None},
                           message=f"{user.display_name} cambió la fecha de inicio")
         card.start_date = new_start
-    if body.dueDate is not None:
+    if "dueDate" in fields_set:
         _gate("dueDate")
         old_due = card.due_date
         card.due_date = _parse_dt(body.dueDate)
+        # Fijada/borrada a mano → deja de derivarse de subtareas.
+        card.due_auto = False
         if old_due != card.due_date:
             _log_activity(db, card, user, "due_changed",
                           payload={"to": card.due_date.isoformat() if card.due_date else None},
                           message=f"{user.display_name} cambió la fecha de vencimiento",
                           notif_key="notif.due_changed",
                           notif_vars={"actor": user.display_name})
+            # Si es subtarea, su cambio de fecha puede afectar el vencimiento del padre.
+            if card.parent_card_id:
+                _recompute_parent_due(db, card.parent_card_id)
+    if body.status is not None and body.status != (card.status or "not_started"):
+        if body.status not in CARD_STATUSES:
+            raise HTTPException(status_code=400, detail="Estado inválido")
+        _gate("move")
+        old_status = card.status or "not_started"
+        card.status = body.status
+        # Integración con "completar": 'done' ↔ completed_at.
+        if body.status == "done" and not card.completed_at:
+            card.completed_at = utc_now()
+            _log_activity(db, card, user, "completed",
+                          message=f"{user.display_name} completed this card",
+                          notif_key="notif.completed", notif_vars={"actor": user.display_name})
+        elif old_status == "done" and body.status != "done" and card.completed_at:
+            card.completed_at = None
+            _log_activity(db, card, user, "reopened",
+                          message=f"{user.display_name} reopened this card", notify=False)
+        else:
+            changes["status"] = {"from": old_status, "to": body.status}
+            changed_fields.append("estado")
     card.updated_at = utc_now()
     if changed_fields:
         _log_activity(db, card, user, "updated",
@@ -1537,6 +1682,16 @@ async def move_card(
         c.position = pos
         c.updated_at = utc_now()
 
+    # Al salir de la PRIMERA etapa (empezarla), si seguía 'not_started' → 'in_progress'.
+    first_pos = db.query(func.min(DeckColumn.position)).filter(
+        DeckColumn.board_id == card.board_id).scalar()
+    started_now = from_col != body.columnId and target_col.position != first_pos
+    if started_now and card.status == "not_started":
+        card.status = "in_progress"
+    # Regla: iniciar una subtarea inicia también a su tarea padre.
+    if started_now and card.parent_card_id:
+        _start_parent_chain(db, card.parent_card_id, user)
+
     if from_col != body.columnId:
         _log_activity(db, card, user, "moved",
                       payload={"from": from_col, "to": body.columnId},
@@ -1558,6 +1713,7 @@ async def complete_card(
     card = _get_card_or_404(db, card_id)
     _require_perm(db, ctx, card, "complete")
     card.completed_at = utc_now()
+    card.status = "done"
     card.updated_at = utc_now()
     _log_activity(db, card, user, "completed", message=f"{user.display_name} completed this card",
                   notif_key="notif.completed", notif_vars={"actor": user.display_name})
@@ -1590,6 +1746,8 @@ async def reopen_card(
     card = _get_card_or_404(db, card_id)
     _require_perm(db, ctx, card, "complete")
     card.completed_at = None
+    if card.status == "done":
+        card.status = "in_progress"
     card.updated_at = utc_now()
     _log_activity(db, card, user, "reopened", message=f"{user.display_name} reopened this card", notify=False)
     db.commit()
@@ -1610,6 +1768,8 @@ async def archive_card(
     card.archived = True
     card.updated_at = utc_now()
     _log_activity(db, card, user, "archived", message=f"{user.display_name} archived this card", notify=False)
+    if card.parent_card_id:
+        _recompute_parent_due(db, card.parent_card_id)
     db.commit()
     return {"success": True}
 
@@ -1643,7 +1803,11 @@ async def delete_card(
     card = _get_card_or_404(db, card_id)
     _require_perm(db, ctx, card, "delete")
     board_id = card.board_id
+    parent_id = card.parent_card_id
     db.delete(card)
+    db.flush()
+    if parent_id:
+        _recompute_parent_due(db, parent_id)
     db.commit()
     _publish_card_event(board_id, card_id, "deleted", user.id)
     return {"success": True}
@@ -2062,6 +2226,67 @@ async def upload_attachment(
     db.commit()
     db.refresh(att)
     return _serialize_attachment(att)
+
+
+_URL_RE = re.compile(r'https?://[^\s"\'<>)\]]+', re.IGNORECASE)
+
+
+def _extract_links(text: Optional[str]):
+    """URLs http(s) de un texto (HTML o plano)."""
+    if not text:
+        return []
+    # quitar tags para no capturar atributos rotos, pero conservar href/src
+    plain = re.sub(r'<[^>]+>', ' ', text)
+    urls = _URL_RE.findall(plain)
+    # limpiar signos de puntuación finales comunes
+    return [u.rstrip('.,;:)') for u in urls]
+
+
+@router.get("/cards/{card_id}/attachments")
+async def list_card_attachments(
+    card_id: int,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Todos los adjuntos de una card en un solo lugar: archivos (de la descripción
+    y de los comentarios) + links (URLs en la descripción/comentarios)."""
+    user = await _get_current_user(authorization, db)
+    ctx = _build_deck_context(db, user)
+    card = _get_card_or_404(db, card_id)
+    _require_see_card(ctx, card)
+
+    atts = db.query(DeckAttachment).filter(DeckAttachment.card_id == card_id)\
+        .order_by(DeckAttachment.created_at.desc()).all()
+    files = []
+    for a in atts:
+        d = _serialize_attachment(a)
+        d["uploadedBy"] = _user_brief(a.uploader) if a.uploader else None
+        d["commentId"] = a.comment_id           # None = viene de la descripción
+        d["createdAt"] = a.created_at.isoformat() if a.created_at else None
+        files.append(d)
+
+    # Links de la descripción + comentarios (dedup, conservando el primer origen).
+    comments = db.query(DeckComment).filter(
+        and_(DeckComment.card_id == card_id, DeckComment.deleted_at.is_(None))
+    ).all()
+    seen = set()
+    links = []
+
+    def _add_links(urls, source, comment_id=None, author=None):
+        for u in urls:
+            if u in seen:
+                continue
+            seen.add(u)
+            links.append({"url": u, "source": source, "commentId": comment_id,
+                          "author": _user_brief(author) if author else None})
+
+    _add_links(_extract_links(card.description), "description")
+    if card.prototype_url:
+        _add_links([card.prototype_url], "prototype")
+    for c in comments:
+        _add_links(_extract_links(c.body), "comment", c.id, c.user)
+
+    return {"files": files, "links": links}
 
 
 @router.get("/attachments/{attachment_id}")
@@ -2536,6 +2761,7 @@ async def board_timeline(
             "priority": c.priority,
             "columnId": c.column_id,
             "assignees": [_user_brief(a.user) for a in c.assignees],
+            "tags": [{"id": ct.tag.id, "name": ct.tag.name} for ct in c.tags if ct.tag],
         })
     return {"cards": out}
 
@@ -3415,7 +3641,7 @@ async def analytics_overview(
 
     risk_cards = []
     for c in cards:
-        if c.completed_at or not c.due_date:
+        if c.completed_at or not c.due_date or c.status == "cancelled":
             continue
         # Excluir del pronóstico las tareas en la PRIMERA etapa (creación: aún no
         # empiezan → no tiene sentido decir que se atrasarán) y en la ÚLTIMA

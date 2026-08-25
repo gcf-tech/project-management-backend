@@ -628,8 +628,15 @@ class DeckCard(Base):
 
     start_date = Column(DateTime(timezone=True), nullable=True)  # con hora
     due_date = Column(DateTime(timezone=True), nullable=True)
+    # La fecha de vencimiento fue derivada automáticamente de las subtareas (la más
+    # lejana) por no tener una fecha manual. Si el usuario la fija a mano → False.
+    due_auto = Column(Boolean, nullable=False, default=False, server_default="0")
     completed_at = Column(DateTime(timezone=True), nullable=True)
     archived = Column(Boolean, default=False)
+    # Estado de la tarea (independiente de la etapa/columna, que es del flujo del
+    # área). Set FIJO global: not_started | in_progress | paused | done | cancelled.
+    # Integrado: 'done' ↔ completed_at; 'cancelled' la saca de "en curso"/riesgo.
+    status = Column(String(20), nullable=False, default="not_started", server_default="not_started")
 
     prototype_url = Column(String(500), nullable=True)  # link al prototipo (etapa Prototipado)
 
@@ -858,6 +865,9 @@ class DeckNotification(Base):
     type = Column(Enum(
         "assigned", "mentioned", "comment", "card_updated",
         "due_soon", "moved", "shared",
+        # Recordatorios del asistente por voz: reusan la campana del workspace
+        # (sin cardId, icono por defecto) en vez de tener canal propio.
+        "assistant_reminder",
     ), nullable=False)
     message = Column(String(500), nullable=True)
     is_read = Column(Boolean, default=False)
@@ -1126,6 +1136,7 @@ class WorkspaceNews(Base):
     titulo = Column(String(255), nullable=True)
     cuerpo = Column(Text, nullable=False)
     imagen_url = Column(String(1000), nullable=True)  # imagen adjunta (enlace público de Nextcloud)
+    oficina = Column(String(30), nullable=True)  # NULL = general (Holding); "mkt","tech"… = de esa oficina
     autor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     fijado = Column(Boolean, default=False, nullable=False, server_default="0")
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
@@ -1135,6 +1146,19 @@ class WorkspaceNews(Base):
     __table_args__ = (
         Index("idx_workspace_news_created", "created_at"),
     )
+
+
+class WorkspacePushSubscription(Base):
+    """Suscripción Web Push de un usuario (notificaciones nativas de la PWA).
+    Una por navegador/dispositivo; se identifica por su `endpoint` único."""
+    __tablename__ = "workspace_push_subscription"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    endpoint = Column(String(500), nullable=False, unique=True)
+    p256dh = Column(String(255), nullable=False)   # clave pública del navegador
+    auth = Column(String(255), nullable=False)     # secreto de autenticación
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 # ── Pegar al final de app/db/models.py ──────────────────────────────────────
 # (Base, utc_now, Column, Integer, String, DECIMAL, Boolean, Text, DateTime e
@@ -1160,4 +1184,111 @@ class Portafolio(Base):
 
     __table_args__ = (
         Index("idx_portafolios_orden", "activo", "orden"),
+    )
+
+
+# ============================================================
+# WORKSPACE ASSISTANT (asistente por voz) MODELS
+# Las tres tablas guardan en UTC; la conversión a Bogotá es de presentación.
+# ============================================================
+
+class WorkspaceAssistantNote(Base):
+    """Notas dictadas al asistente. `origen` distingue transcripción de texto
+    escrito a mano: la dictada puede arrastrar errores de transcripción."""
+    __tablename__ = "workspace_assistant_notes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    titulo = Column(String(255), nullable=False)
+    cuerpo = Column(Text, nullable=False)
+    origen = Column(Enum("voz", "texto"), nullable=False, default="voz", server_default="voz")
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    usuario = relationship("User", foreign_keys=[usuario_id])
+
+    __table_args__ = (
+        Index("idx_ws_asst_notes_usuario", "usuario_id", "created_at"),
+    )
+
+
+class WorkspaceAssistantReminder(Base):
+    """Recordatorios creados por el asistente. Los barre el scheduler del
+    backend (no el Express, cuyo estado es volátil) cada 60 s."""
+    __tablename__ = "workspace_assistant_reminders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    texto = Column(String(500), nullable=False)
+    vence_en = Column(DateTime(timezone=True), nullable=False)   # SIEMPRE UTC
+    # Zona IANA de quien creó el recordatorio ("Europe/Madrid"). Es un METADATO:
+    # sirve para volver a pintar la hora tal y como la pidió esa persona, y para
+    # auditar por qué un aviso sonó cuando sonó. `vence_en` sigue siendo el único
+    # dato que decide CUÁNDO, y sigue siendo siempre UTC.
+    # NO participa en el barrido del scheduler, y no es un olvido: ese barrido
+    # compara UTC contra UTC, y meter la zona en el filtro reintroduciría
+    # aritmética de husos justo donde hoy no hace falta ninguna.
+    # El default cubre a las filas anteriores a la columna y a los clientes que
+    # no la mandan: hasta que existió, todo el mundo estaba en esta zona.
+    zona_horaria = Column(
+        String(64), nullable=False,
+        default="America/Bogota", server_default="America/Bogota",
+    )
+    estado = Column(
+        Enum("pendiente", "notificado", "cancelado"),
+        nullable=False, default="pendiente", server_default="pendiente",
+    )
+    notificado_en = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    usuario = relationship("User", foreign_keys=[usuario_id])
+
+    __table_args__ = (
+        # El scheduler consulta por (estado, vence_en) cada minuto.
+        Index("idx_ws_asst_rem_estado_vence", "estado", "vence_en"),
+        Index("idx_ws_asst_rem_usuario", "usuario_id", "estado"),
+    )
+
+
+class WorkspaceAssistantLog(Base):
+    """Auditoría de lo que hizo el asistente (no es debug). Guarda la
+    `transcripcion` original junto a los `argumentos` interpretados: la
+    diferencia entre ambos delata que el modelo entendió mal. Se escribe
+    siempre: acción exitosa, fallida y también simulada."""
+    __tablename__ = "workspace_assistant_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    accion = Column(String(60), nullable=False)
+    argumentos = Column(JSON, nullable=True)
+    resultado = Column(Enum("ok", "error"), nullable=False)
+    detalle = Column(Text, nullable=True)          # motivo del error, o id de lo creado
+    transcripcion = Column(Text, nullable=True)    # el texto original que originó la acción
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    usuario = relationship("User", foreign_keys=[usuario_id])
+
+    __table_args__ = (
+        Index("idx_ws_asst_log_usuario", "usuario_id", "created_at"),
+    )
+
+class PortafolioRentabilidad(Base):
+    """Rentabilidad mensual de un portafolio: una fila por (portafolio, año, mes).
+    Un mes sin fila = sin dato = cuenta como 0 en el total del año. El total NO
+    se guarda: se calcula al vuelo (suma de los meses con valor)."""
+    __tablename__ = "portafolio_rentabilidad"
+ 
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    portafolio_id = Column(
+        Integer, ForeignKey("portafolios.id", ondelete="CASCADE"), nullable=False
+    )
+    anio = Column(Integer, nullable=False)
+    mes = Column(Integer, nullable=False)              # 1-12
+    valor = Column(DECIMAL(6, 2), nullable=False)      # % (admite negativos)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+ 
+    __table_args__ = (
+        Index("uq_portafolio_rentabilidad_cell", "portafolio_id", "anio", "mes", unique=True),
+        Index("idx_portafolio_rentabilidad_pa", "portafolio_id", "anio"),
     )
