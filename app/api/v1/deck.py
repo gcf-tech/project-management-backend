@@ -1592,7 +1592,10 @@ async def patch_card(
         if new_proto != card.prototype_url:
             changed_fields.append("prototipo")
         card.prototype_url = new_proto
-    if body.startDate is not None:
+    # Nota: usamos model_fields_set (no `is not None`) para poder DISTINGUIR
+    # "no enviado" de "enviado en null" y así permitir BORRAR la fecha.
+    fields_set = body.model_fields_set
+    if "startDate" in fields_set:
         _gate("dates")
         new_start = _parse_dt(body.startDate)
         if new_start != card.start_date:
@@ -1600,11 +1603,11 @@ async def patch_card(
                           payload={"to": new_start.isoformat() if new_start else None},
                           message=f"{user.display_name} cambió la fecha de inicio")
         card.start_date = new_start
-    if body.dueDate is not None:
+    if "dueDate" in fields_set:
         _gate("dueDate")
         old_due = card.due_date
         card.due_date = _parse_dt(body.dueDate)
-        # Fijada a mano → deja de derivarse de subtareas.
+        # Fijada/borrada a mano → deja de derivarse de subtareas.
         card.due_auto = False
         if old_due != card.due_date:
             _log_activity(db, card, user, "due_changed",
