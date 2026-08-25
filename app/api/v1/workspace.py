@@ -34,8 +34,11 @@ from app.db.models import (
     User, WorkspaceProfile, WorkspaceSession, WorkspaceDailyTime,
     WorkspaceActivity, WorkspaceTask, WorkspaceMessage, WorkspaceWorkstation,
     WorkspaceMeeting, WorkspaceMeetingParticipant, WorkspaceNews,
+    WorkspacePushSubscription,
     DeckCard, DeckCardAssignee, DeckColumn,
 )
+from app.core import config as _cfg
+from app.services.push import enviar_push, push_habilitado
 
 router = APIRouter()
 
@@ -1628,3 +1631,93 @@ async def borrar_news(
     db.delete(n)
     db.commit()
     return {"ok": True}
+
+
+# ============================================================
+# WEB PUSH (PWA) — notificaciones nativas al celular
+# ============================================================
+class PushSubIn(BaseModel):
+    endpoint: str
+    keys: dict = {}
+
+
+@router.get("/push/key")
+async def push_key():
+    """Clave pública VAPID para que el navegador se suscriba. Vacía = push apagado."""
+    return {"publicKey": _cfg.VAPID_PUBLIC_KEY if push_habilitado() else ""}
+
+
+@router.post("/push/subscribe")
+async def push_subscribe(
+    body: PushSubIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Guarda (o actualiza) la suscripción Web Push del navegador del usuario."""
+    user = await _resolve_user(authorization, db)
+    endpoint = (body.endpoint or "").strip()
+    p256dh = (body.keys or {}).get("p256dh")
+    auth = (body.keys or {}).get("auth")
+    if not endpoint or not p256dh or not auth:
+        raise HTTPException(status_code=400, detail="Suscripción incompleta")
+    sub = db.query(WorkspacePushSubscription).filter(
+        WorkspacePushSubscription.endpoint == endpoint).first()
+    if sub:
+        sub.user_id = user.id
+        sub.p256dh = p256dh
+        sub.auth = auth
+    else:
+        db.add(WorkspacePushSubscription(
+            user_id=user.id, endpoint=endpoint, p256dh=p256dh, auth=auth))
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/push/subscribe")
+async def push_unsubscribe(
+    body: PushSubIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Elimina una suscripción (cuando el navegador la revoca)."""
+    await _resolve_user(authorization, db)
+    endpoint = (body.endpoint or "").strip()
+    if endpoint:
+        db.query(WorkspacePushSubscription).filter(
+            WorkspacePushSubscription.endpoint == endpoint).delete()
+        db.commit()
+    return {"ok": True}
+
+
+@router.post("/push/test")
+async def push_test(
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Envía un push de prueba al propio usuario (para verificar la config)."""
+    user = await _resolve_user(authorization, db)
+    n = enviar_push(db, user.id, "GCF Workspace",
+                    "🔔 Notificaciones activadas correctamente.", url="/", tag="gcf-test")
+    return {"enviados": n, "habilitado": push_habilitado()}
+
+
+class PushNotifyIn(BaseModel):
+    userId: int
+    title: str
+    body: str = ""
+    url: str = "/"
+    tag: str = "gcf-workspace"
+
+
+@router.post("/push/notify")
+async def push_notify(
+    body: PushNotifyIn,
+    db: Session = Depends(get_db),
+    x_push_secret: Annotated[str | None, Header()] = None,
+):
+    """Puente servidor-a-servidor: el Node del workspace pide un push para un
+    usuario (llamada/nudge/reunión cuando NO está conectado). Protegido por secreto."""
+    if not _cfg.PUSH_BRIDGE_SECRET or x_push_secret != _cfg.PUSH_BRIDGE_SECRET:
+        raise HTTPException(status_code=403, detail="No autorizado")
+    n = enviar_push(db, body.userId, body.title, body.body, url=body.url, tag=body.tag)
+    return {"enviados": n}

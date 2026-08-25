@@ -1147,6 +1147,19 @@ class WorkspaceNews(Base):
         Index("idx_workspace_news_created", "created_at"),
     )
 
+
+class WorkspacePushSubscription(Base):
+    """Suscripción Web Push de un usuario (notificaciones nativas de la PWA).
+    Una por navegador/dispositivo; se identifica por su `endpoint` único."""
+    __tablename__ = "workspace_push_subscription"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    endpoint = Column(String(500), nullable=False, unique=True)
+    p256dh = Column(String(255), nullable=False)   # clave pública del navegador
+    auth = Column(String(255), nullable=False)     # secreto de autenticación
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
 # ── Pegar al final de app/db/models.py ──────────────────────────────────────
 # (Base, utc_now, Column, Integer, String, DECIMAL, Boolean, Text, DateTime e
 #  Index ya están importados en ese archivo — no hace falta añadir imports.)
