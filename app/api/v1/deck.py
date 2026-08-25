@@ -1650,7 +1650,14 @@ async def patch_card(
                       notif_vars={"actor": user.display_name})
     db.commit()
     db.refresh(card)
-    return _serialize_card(card, full=True)
+    result = _serialize_card(card, full=True)
+    # Si es subtarea y cambió su fecha, el padre pudo re-derivar su vencimiento:
+    # devolvemos su estado nuevo para que el front lo refleje sin recargar.
+    if card.parent_card_id and "dueDate" in fields_set:
+        parent = db.query(DeckCard).filter(DeckCard.id == card.parent_card_id).first()
+        if parent:
+            result["parentUpdate"] = _serialize_card(parent, full=True)
+    return result
 
 
 @router.post("/cards/{card_id}/move")
