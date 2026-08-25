@@ -380,12 +380,12 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
 
 
 def _recompute_parent_due(db: Session, parent_id: Optional[int], _seen=None):
-    """Deriva la fecha de vencimiento de una tarea desde sus subtareas.
+    """Sincroniza la fecha de vencimiento de una tarea con sus subtareas.
 
-    Regla: si la tarea NO tiene fecha manual (due_auto=True o sin fecha), su
-    vencimiento pasa a ser el MÁS LEJANO de sus subtareas. Si el usuario fijó la
-    fecha a mano (due_auto=False y con fecha), no se toca. Burbujea hacia arriba
-    por si el padre es a su vez subtarea.
+    Regla: si la tarea tiene subtareas con fecha, su vencimiento SIEMPRE pasa a
+    ser el MÁS LEJANO de esas subtareas (aunque el padre ya tuviera una fecha).
+    Si ninguna subtarea tiene fecha: se limpia la que estaba autoderivada; una
+    fecha manual se respeta. Burbujea hacia arriba por si el padre es subtarea.
     """
     if not parent_id:
         return
@@ -396,20 +396,24 @@ def _recompute_parent_due(db: Session, parent_id: Optional[int], _seen=None):
     parent = db.query(DeckCard).filter(DeckCard.id == parent_id).first()
     if not parent:
         return
-    # Solo auto-derivar si no hay fecha manual.
-    if not (parent.due_auto or parent.due_date is None):
-        return
     rows = db.query(DeckCard.due_date).filter(
         DeckCard.parent_card_id == parent.id,
         DeckCard.archived.is_(False),
         DeckCard.due_date.isnot(None),
     ).all()
     dues = [r[0] for r in rows if r[0] is not None]
-    new_due = max(dues, key=lambda d: _as_utc(d)) if dues else None
-    if new_due != parent.due_date:
-        parent.due_date = new_due
-        parent.updated_at = utc_now()
-    parent.due_auto = new_due is not None
+    if dues:
+        new_due = max(dues, key=lambda d: _as_utc(d))
+        if new_due != parent.due_date:
+            parent.due_date = new_due
+            parent.updated_at = utc_now()
+        parent.due_auto = True
+    else:
+        # Sin fechas en subtareas: solo se limpia si venía autoderivada.
+        if parent.due_auto and parent.due_date is not None:
+            parent.due_date = None
+            parent.updated_at = utc_now()
+        parent.due_auto = False
     if parent.parent_card_id:
         _recompute_parent_due(db, parent.parent_card_id, _seen)
 
