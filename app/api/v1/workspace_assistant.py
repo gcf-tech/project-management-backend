@@ -1,5 +1,6 @@
 """
-Asistente por voz del Workspace (Fase 2B) — notas, recordatorios y auditoría.
+Asistente por voz del Workspace (Fase 2B) — notas, recordatorios, auditoría
+e historial de conversación.
 
 Montado en /api/workspace/assistant. Mismo patrón que workspace.py: la identidad
 SIEMPRE sale del token Nextcloud vía _resolve_user, nunca del body.
@@ -14,6 +15,7 @@ Notas:
   saliendo del offset que trae el ISO, como hasta ahora.
 """
 from fastapi import APIRouter, Depends, HTTPException, Header
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import Annotated, List, Optional, Literal
 from datetime import datetime
@@ -24,6 +26,7 @@ from app.api.dependencies import get_db
 from app.core.datetime_utils import utc_now, to_rfc3339_z, ensure_aware_utc
 from app.db.models import (
     User, WorkspaceAssistantNote, WorkspaceAssistantReminder, WorkspaceAssistantLog,
+    WorkspaceAssistantThread, WorkspaceAssistantMessage,
 )
 from app.api.v1.workspace import _resolve_user
 
@@ -340,3 +343,223 @@ async def registrar_log(body: LogIn, authorization: Annotated[str, Header()], db
     db.commit()
     db.refresh(entrada)
     return {"id": entrada.id}
+
+
+# ============================================================
+# HISTORIAL DE CONVERSACIÓN
+# ============================================================
+#
+# Un hilo agrupa los turnos de una charla; cada turno es una fila con su hora.
+# Tres decisiones que conviene no deshacer sin leer antes:
+#
+#  · La hora la estampa el SERVIDOR. Es lo que se pinta debajo de cada burbuja,
+#    y un reloj de navegador adelantado dejaría el historial en un orden que no
+#    ocurrió. El cliente convierte a su huso al pintar, nunca al guardar.
+#  · Los hilos vacíos no existen. El hilo se crea con el primer mensaje ya
+#    escrito, así que no hay forma de acumular hilos en blanco a base de pulsar
+#    "conversación nueva".
+#  · Borrar TODO exige `confirmar=si`. Un DELETE sobre la colección es la única
+#    ruta de este archivo que destruye datos de varios hilos a la vez.
+
+LARGO_TITULO = 120
+TOPE_HILOS = 100
+TOPE_MENSAJES = 200
+
+
+class HiloIn(BaseModel):
+    titulo: str = Field(min_length=1, max_length=LARGO_TITULO)
+
+
+class MensajeIn(BaseModel):
+    rol: Literal["usuario", "asistente"]
+    contenido: str = Field(min_length=1)
+    origen: Literal["voz", "texto"] = "texto"
+
+
+def _hilo_dict(h: WorkspaceAssistantThread, mensajes: Optional[int] = None) -> dict:
+    d = {
+        "id": h.id,
+        "titulo": h.titulo,
+        "created_at": to_rfc3339_z(h.created_at),
+        "updated_at": to_rfc3339_z(h.updated_at),
+    }
+    if mensajes is not None:
+        d["mensajes"] = mensajes
+    return d
+
+
+def _mensaje_dict(m: WorkspaceAssistantMessage) -> dict:
+    return {
+        "id": m.id,
+        "rol": m.rol,
+        "contenido": m.contenido,
+        "origen": m.origen,
+        "created_at": to_rfc3339_z(m.created_at),
+    }
+
+
+def _hilo_o_404(hilo_id: int, user: User, db: Session) -> WorkspaceAssistantThread:
+    """El hilo de ESA persona, o 404. `usuario_id` va en el WHERE por el mismo
+    motivo que en las notas: un hilo ajeno no existe para esta query, así que
+    responde 404 y no 403. Un 403 confirmaría que ese id existe y convertiría la
+    ruta en un sondeo de conversaciones de otras personas."""
+    h = (
+        db.query(WorkspaceAssistantThread)
+        .filter(
+            WorkspaceAssistantThread.id == hilo_id,
+            WorkspaceAssistantThread.usuario_id == user.id,
+        )
+        .first()
+    )
+    if not h:
+        raise HTTPException(status_code=404, detail="Hilo no encontrado")
+    return h
+
+
+def _titulo_limpio(texto: str) -> str:
+    """Una sola línea, sin espacios de más y recortada al ancho de la columna.
+    Se recorta con puntos suspensivos para que se note que hay más texto: un
+    corte seco se lee como si la frase hubiera terminado ahí."""
+    plano = " ".join(texto.split())
+    if len(plano) <= LARGO_TITULO:
+        return plano
+    return plano[: LARGO_TITULO - 1].rstrip() + "…"
+
+
+@router.post("/hilos")
+async def crear_hilo(body: HiloIn, authorization: Annotated[str, Header()], db: Session = Depends(get_db)):
+    """Abre un hilo. El título lo manda el cliente con la primera frase de la
+    persona ya escrita — no lo redacta el modelo, que al reintentar devolvería
+    otro y el hilo dejaría de reconocerse en la lista."""
+    user = await _resolve_user(authorization, db)
+    titulo = _titulo_limpio(body.titulo)
+    if not titulo:
+        raise HTTPException(status_code=422, detail="El título no puede quedar vacío")
+    h = WorkspaceAssistantThread(
+        usuario_id=user.id,          # del TOKEN, no del body
+        titulo=titulo,
+        created_at=utc_now(),
+        updated_at=utc_now(),
+    )
+    db.add(h)
+    db.commit()
+    db.refresh(h)
+    return _hilo_dict(h, mensajes=0)
+
+
+@router.get("/hilos")
+async def listar_hilos(
+    authorization: Annotated[str, Header()],
+    limit: int = 30,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
+    """Los hilos de la persona, del más reciente al más antiguo. El contador de
+    mensajes sale de un GROUP BY en la misma consulta: pedirlo hilo por hilo
+    sería un N+1 que crece con cada conversación guardada."""
+    user = await _resolve_user(authorization, db)
+    n = min(max(limit, 1), TOPE_HILOS)
+    desde = max(offset, 0)
+    filas = (
+        db.query(
+            WorkspaceAssistantThread,
+            func.count(WorkspaceAssistantMessage.id).label("mensajes"),
+        )
+        .outerjoin(
+            WorkspaceAssistantMessage,
+            WorkspaceAssistantMessage.hilo_id == WorkspaceAssistantThread.id,
+        )
+        .filter(WorkspaceAssistantThread.usuario_id == user.id)   # filtro en el SERVIDOR
+        .group_by(WorkspaceAssistantThread.id)
+        .order_by(WorkspaceAssistantThread.updated_at.desc())
+        .limit(n)
+        .offset(desde)
+        .all()
+    )
+    return [_hilo_dict(h, mensajes=int(c or 0)) for h, c in filas]
+
+
+@router.get("/hilos/{hilo_id}/mensajes")
+async def listar_mensajes(
+    hilo_id: int,
+    authorization: Annotated[str, Header()],
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
+    """Los turnos de un hilo, en orden de llegada. Se pagina como todo lo demás:
+    una conversación larga no puede devolverse entera por costumbre."""
+    user = await _resolve_user(authorization, db)
+    h = _hilo_o_404(hilo_id, user, db)
+    n = min(max(limit, 1), TOPE_MENSAJES)
+    desde = max(offset, 0)
+    filas = (
+        db.query(WorkspaceAssistantMessage)
+        .filter(WorkspaceAssistantMessage.hilo_id == h.id)
+        .order_by(WorkspaceAssistantMessage.id.asc())
+        .limit(n)
+        .offset(desde)
+        .all()
+    )
+    return {"hilo": _hilo_dict(h), "mensajes": [_mensaje_dict(m) for m in filas]}
+
+
+@router.post("/hilos/{hilo_id}/mensajes")
+async def agregar_mensaje(
+    hilo_id: int,
+    body: MensajeIn,
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Añade un turno y adelanta el `updated_at` del hilo, que es lo que ordena
+    la lista. Las dos escrituras van en la MISMA transacción: un mensaje
+    guardado en un hilo que sigue figurando como viejo se hunde en la lista y
+    la persona no lo encuentra."""
+    user = await _resolve_user(authorization, db)
+    h = _hilo_o_404(hilo_id, user, db)
+    ahora = utc_now()
+    m = WorkspaceAssistantMessage(
+        hilo_id=h.id,
+        rol=body.rol,
+        contenido=body.contenido,
+        origen=body.origen,
+        created_at=ahora,
+    )
+    db.add(m)
+    h.updated_at = ahora
+    db.commit()
+    db.refresh(m)
+    return _mensaje_dict(m)
+
+
+@router.delete("/hilos/{hilo_id}")
+async def borrar_hilo(hilo_id: int, authorization: Annotated[str, Header()], db: Session = Depends(get_db)):
+    """Borra un hilo y sus mensajes. El borrado de los mensajes lo hace el
+    ON DELETE CASCADE de la FK, no un bucle en Python."""
+    user = await _resolve_user(authorization, db)
+    h = _hilo_o_404(hilo_id, user, db)
+    db.delete(h)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/hilos")
+async def borrar_todos_los_hilos(
+    authorization: Annotated[str, Header()],
+    confirmar: str = "",
+    db: Session = Depends(get_db),
+):
+    """Borra TODAS las conversaciones de la persona. Exige `?confirmar=si` a
+    propósito: es la única ruta de este archivo que destruye varios hilos de una
+    vez, y un DELETE sobre la colección se dispara demasiado fácil —desde una
+    ruta mal formada o un reintento— para no pedir nada."""
+    user = await _resolve_user(authorization, db)
+    if confirmar != "si":
+        raise HTTPException(status_code=422, detail="Falta confirmar=si")
+    borrados = (
+        db.query(WorkspaceAssistantThread)
+        .filter(WorkspaceAssistantThread.usuario_id == user.id)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"ok": True, "borrados": int(borrados or 0)}

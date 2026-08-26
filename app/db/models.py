@@ -1272,6 +1272,7 @@ class WorkspaceAssistantLog(Base):
         Index("idx_ws_asst_log_usuario", "usuario_id", "created_at"),
     )
 
+
 class PortafolioRentabilidad(Base):
     """Rentabilidad mensual de un portafolio: una fila por (portafolio, año, mes).
     Un mes sin fila = sin dato = cuenta como 0 en el total del año. El total NO
@@ -1291,4 +1292,62 @@ class PortafolioRentabilidad(Base):
     __table_args__ = (
         Index("uq_portafolio_rentabilidad_cell", "portafolio_id", "anio", "mes", unique=True),
         Index("idx_portafolio_rentabilidad_pa", "portafolio_id", "anio"),
+    )
+
+
+class WorkspaceAssistantThread(Base):
+    """Un hilo de conversación con la secretaria. El `titulo` sale de la primera
+    frase que escribió la persona, no del modelo: un título generado por el
+    agente cambiaría al reintentar y el hilo dejaría de reconocerse en la lista.
+    `updated_at` ordena la lista, así que se toca en cada mensaje nuevo."""
+    __tablename__ = "workspace_assistant_threads"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    titulo = Column(String(120), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    usuario = relationship("User", foreign_keys=[usuario_id])
+    mensajes = relationship(
+        "WorkspaceAssistantMessage",
+        back_populates="hilo",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        # La lista de hilos se pide siempre del más reciente hacia atrás.
+        Index("idx_ws_asst_hilo_usuario", "usuario_id", "updated_at"),
+    )
+
+
+class WorkspaceAssistantMessage(Base):
+    """Un turno de la conversación. `created_at` lo estampa el SERVIDOR, no el
+    navegador: es la hora que se pinta debajo de cada burbuja, y un reloj de
+    cliente adelantado dejaría el historial en un orden que no ocurrió.
+
+    Para la persona, `created_at` de una fila `usuario` es la hora a la que
+    escribió, y el de la fila `asistente` siguiente es la hora a la que le
+    contestaron. No hacen falta dos columnas por fila: son dos filas."""
+    __tablename__ = "workspace_assistant_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    hilo_id = Column(
+        Integer,
+        ForeignKey("workspace_assistant_threads.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    rol = Column(Enum("usuario", "asistente"), nullable=False)
+    contenido = Column(Text, nullable=False)
+    # De dónde salió el turno de la persona. En las filas del asistente es
+    # siempre "texto": lo que se guarda es lo que el modelo devolvió escrito.
+    origen = Column(Enum("voz", "texto"), nullable=False, default="texto", server_default="texto")
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    hilo = relationship("WorkspaceAssistantThread", back_populates="mensajes")
+
+    __table_args__ = (
+        # Se leen siempre todos los de un hilo, en orden de llegada.
+        Index("idx_ws_asst_msg_hilo", "hilo_id", "id"),
     )
