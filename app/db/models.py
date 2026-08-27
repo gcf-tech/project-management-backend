@@ -1221,6 +1221,19 @@ class WorkspaceAssistantReminder(Base):
     usuario_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     texto = Column(String(500), nullable=False)
     vence_en = Column(DateTime(timezone=True), nullable=False)   # SIEMPRE UTC
+    # Zona IANA de quien creó el recordatorio ("Europe/Madrid"). Es un METADATO:
+    # sirve para volver a pintar la hora tal y como la pidió esa persona, y para
+    # auditar por qué un aviso sonó cuando sonó. `vence_en` sigue siendo el único
+    # dato que decide CUÁNDO, y sigue siendo siempre UTC.
+    # NO participa en el barrido del scheduler, y no es un olvido: ese barrido
+    # compara UTC contra UTC, y meter la zona en el filtro reintroduciría
+    # aritmética de husos justo donde hoy no hace falta ninguna.
+    # El default cubre a las filas anteriores a la columna y a los clientes que
+    # no la mandan: hasta que existió, todo el mundo estaba en esta zona.
+    zona_horaria = Column(
+        String(64), nullable=False,
+        default="America/Bogota", server_default="America/Bogota",
+    )
     estado = Column(
         Enum("pendiente", "notificado", "cancelado"),
         nullable=False, default="pendiente", server_default="pendiente",
@@ -1257,4 +1270,84 @@ class WorkspaceAssistantLog(Base):
 
     __table_args__ = (
         Index("idx_ws_asst_log_usuario", "usuario_id", "created_at"),
+    )
+
+
+class PortafolioRentabilidad(Base):
+    """Rentabilidad mensual de un portafolio: una fila por (portafolio, año, mes).
+    Un mes sin fila = sin dato = cuenta como 0 en el total del año. El total NO
+    se guarda: se calcula al vuelo (suma de los meses con valor)."""
+    __tablename__ = "portafolio_rentabilidad"
+ 
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    portafolio_id = Column(
+        Integer, ForeignKey("portafolios.id", ondelete="CASCADE"), nullable=False
+    )
+    anio = Column(Integer, nullable=False)
+    mes = Column(Integer, nullable=False)              # 1-12
+    valor = Column(DECIMAL(6, 2), nullable=False)      # % (admite negativos)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+ 
+    __table_args__ = (
+        Index("uq_portafolio_rentabilidad_cell", "portafolio_id", "anio", "mes", unique=True),
+        Index("idx_portafolio_rentabilidad_pa", "portafolio_id", "anio"),
+    )
+
+
+class WorkspaceAssistantThread(Base):
+    """Un hilo de conversación con la secretaria. El `titulo` sale de la primera
+    frase que escribió la persona, no del modelo: un título generado por el
+    agente cambiaría al reintentar y el hilo dejaría de reconocerse en la lista.
+    `updated_at` ordena la lista, así que se toca en cada mensaje nuevo."""
+    __tablename__ = "workspace_assistant_threads"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    titulo = Column(String(120), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    usuario = relationship("User", foreign_keys=[usuario_id])
+    mensajes = relationship(
+        "WorkspaceAssistantMessage",
+        back_populates="hilo",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        # La lista de hilos se pide siempre del más reciente hacia atrás.
+        Index("idx_ws_asst_hilo_usuario", "usuario_id", "updated_at"),
+    )
+
+
+class WorkspaceAssistantMessage(Base):
+    """Un turno de la conversación. `created_at` lo estampa el SERVIDOR, no el
+    navegador: es la hora que se pinta debajo de cada burbuja, y un reloj de
+    cliente adelantado dejaría el historial en un orden que no ocurrió.
+
+    Para la persona, `created_at` de una fila `usuario` es la hora a la que
+    escribió, y el de la fila `asistente` siguiente es la hora a la que le
+    contestaron. No hacen falta dos columnas por fila: son dos filas."""
+    __tablename__ = "workspace_assistant_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    hilo_id = Column(
+        Integer,
+        ForeignKey("workspace_assistant_threads.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    rol = Column(Enum("usuario", "asistente"), nullable=False)
+    contenido = Column(Text, nullable=False)
+    # De dónde salió el turno de la persona. En las filas del asistente es
+    # siempre "texto": lo que se guarda es lo que el modelo devolvió escrito.
+    origen = Column(Enum("voz", "texto"), nullable=False, default="texto", server_default="texto")
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    hilo = relationship("WorkspaceAssistantThread", back_populates="mensajes")
+
+    __table_args__ = (
+        # Se leen siempre todos los de un hilo, en orden de llegada.
+        Index("idx_ws_asst_msg_hilo", "hilo_id", "id"),
     )

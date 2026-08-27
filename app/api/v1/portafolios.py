@@ -10,15 +10,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db, require_user
-from app.db.models import Portafolio, User
+from app.db.models import Portafolio, PortafolioRentabilidad, User
 from app.schemas.portafolio_schemas import (
     PortafolioCreate,
     PortafolioOut,
     PortafolioUpdate,
+    RentabilidadYearOut,   # nuevo
+    RentabilidadYearIn,
 )
 
 router = APIRouter()
 
+MESES_VALIDOS = range(1, 13)
 
 async def require_commercial(user: User = Depends(require_user)) -> User:
     """Acceso a la herramienta de portafolios: equipo comercial.
@@ -108,4 +111,90 @@ def delete_portafolio(
     if not p:
         raise HTTPException(status_code=404, detail="Portafolio no encontrado")
     db.delete(p)
+    db.commit()
+
+@router.get("/{portafolio_id}/rentabilidad", response_model=List[RentabilidadYearOut])
+def get_rentabilidad(
+    portafolio_id: int,
+    _user: User = Depends(require_commercial),
+    db: Session = Depends(get_db),
+):
+    if not db.query(Portafolio).filter(Portafolio.id == portafolio_id).first():
+        raise HTTPException(status_code=404, detail="Portafolio no encontrado")
+ 
+    filas = (
+        db.query(PortafolioRentabilidad)
+        .filter(PortafolioRentabilidad.portafolio_id == portafolio_id)
+        .order_by(PortafolioRentabilidad.anio.asc(), PortafolioRentabilidad.mes.asc())
+        .all()
+    )
+    por_anio: dict[int, dict[int, object]] = {}
+    for f in filas:
+        por_anio.setdefault(f.anio, {})[f.mes] = f.valor
+    return [RentabilidadYearOut(anio=a, meses=por_anio[a]) for a in sorted(por_anio)]
+ 
+ 
+@router.put("/{portafolio_id}/rentabilidad/{anio}", response_model=RentabilidadYearOut)
+def guardar_anio(
+    portafolio_id: int,
+    anio: int,
+    body: RentabilidadYearIn,
+    _user: User = Depends(require_commercial),
+    db: Session = Depends(get_db),
+):
+    if not db.query(Portafolio).filter(Portafolio.id == portafolio_id).first():
+        raise HTTPException(status_code=404, detail="Portafolio no encontrado")
+ 
+    # Filas actuales del año, indexadas por mes.
+    existentes = {
+        f.mes: f
+        for f in db.query(PortafolioRentabilidad)
+        .filter(
+            PortafolioRentabilidad.portafolio_id == portafolio_id,
+            PortafolioRentabilidad.anio == anio,
+        )
+        .all()
+    }
+ 
+    # PUT = reemplazo total del año: mes con valor → upsert; null/ausente → borrar.
+    for mes in MESES_VALIDOS:
+        valor = body.meses.get(mes)
+        fila = existentes.get(mes)
+        if valor is None:
+            if fila is not None:
+                db.delete(fila)
+        elif fila is not None:
+            fila.valor = valor
+        else:
+            db.add(
+                PortafolioRentabilidad(
+                    portafolio_id=portafolio_id, anio=anio, mes=mes, valor=valor
+                )
+            )
+ 
+    db.commit()
+ 
+    filas = (
+        db.query(PortafolioRentabilidad)
+        .filter(
+            PortafolioRentabilidad.portafolio_id == portafolio_id,
+            PortafolioRentabilidad.anio == anio,
+        )
+        .order_by(PortafolioRentabilidad.mes.asc())
+        .all()
+    )
+    return RentabilidadYearOut(anio=anio, meses={f.mes: f.valor for f in filas})
+ 
+ 
+@router.delete("/{portafolio_id}/rentabilidad/{anio}", status_code=204)
+def borrar_anio(
+    portafolio_id: int,
+    anio: int,
+    _user: User = Depends(require_commercial),
+    db: Session = Depends(get_db),
+):
+    db.query(PortafolioRentabilidad).filter(
+        PortafolioRentabilidad.portafolio_id == portafolio_id,
+        PortafolioRentabilidad.anio == anio,
+    ).delete(synchronize_session=False)
     db.commit()
