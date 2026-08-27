@@ -11,6 +11,10 @@ NC_URL = os.getenv("NC_URL", "https://portaltest.gcf.group")
 VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "")
 VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "")
 VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "mailto:tech@gcf.group")
+
+# Clave Fernet para cifrar el access token de Nextcloud cacheado (push de Talk).
+# Sin ella, el push de Talk queda desactivado (no se cachea ningún token).
+PUSH_TOKEN_KEY = os.getenv("PUSH_TOKEN_KEY", "")
 # Secreto compartido con el servidor Node del workspace: le permite pedir un push
 # (p. ej. "te están llamando") cuando el destinatario NO está conectado.
 PUSH_BRIDGE_SECRET = os.getenv("PUSH_BRIDGE_SECRET", "")

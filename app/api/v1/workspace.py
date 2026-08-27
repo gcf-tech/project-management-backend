@@ -39,6 +39,7 @@ from app.db.models import (
 )
 from app.core import config as _cfg
 from app.services.push import enviar_push, push_habilitado
+from app.services.push_tokens import guardar_access_token, cifrado_disponible
 
 router = APIRouter()
 
@@ -1721,3 +1722,21 @@ async def push_notify(
         raise HTTPException(status_code=403, detail="No autorizado")
     n = enviar_push(db, body.userId, body.title, body.body, url=body.url, tag=body.tag)
     return {"enviados": n}
+
+
+@router.post("/push/nc-token")
+async def push_nc_token(
+    authorization: Annotated[str, Header()],
+    db: Session = Depends(get_db),
+):
+    """Cachea (cifrado) el access token de Nextcloud del usuario para que el poller
+    de Talk pueda consultarle mensajes con la app cerrada. El cliente lo llama al
+    activar el push y cada pocos minutos mientras está abierto (para mantenerlo
+    fresco). El token sale del propio header Authorization."""
+    user = await _resolve_user(authorization, db)
+    if not cifrado_disponible():
+        return {"ok": False, "motivo": "cifrado no configurado"}
+    token = (authorization or "").split(" ")[-1].strip()
+    if token:
+        guardar_access_token(db, user.id, token, expires_in=3600)
+    return {"ok": True}

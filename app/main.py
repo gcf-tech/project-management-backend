@@ -6,6 +6,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router, calendar, reports, commercial, assessment, deck, workspace, workspace_assistant, portafolios
 from app.services.assistant_reminders import bucle_recordatorios
+from app.services.deck_push import bucle_push_deck
+from app.services.talk_push import bucle_talk_push
 
 
 @asynccontextmanager
@@ -14,15 +16,20 @@ async def lifespan(app: FastAPI):
     # Scheduler de recordatorios del asistente. Va aquí y no en el Express del
     # workspace, cuyo estado es volátil y se pierde en cada reinicio.
     tarea_recordatorios = asyncio.create_task(bucle_recordatorios())
+    # Barrido de push nativo 'due_soon' del Deck (para que llegue con la app cerrada).
+    tarea_deck_push = asyncio.create_task(bucle_push_deck())
+    # Poller de push nativo de mensajes de Talk (con la app cerrada).
+    tarea_talk_push = asyncio.create_task(bucle_talk_push())
     try:
         yield
     finally:
-        # Sin cancelar, un reload deja el bucle huérfano golpeando la BD.
-        tarea_recordatorios.cancel()
-        try:
-            await tarea_recordatorios
-        except asyncio.CancelledError:
-            pass
+        # Sin cancelar, un reload deja los bucles huérfanos golpeando la BD.
+        for t in (tarea_recordatorios, tarea_deck_push, tarea_talk_push):
+            t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
         print("[INFO] Activity Tracker API shutting down")
 
 

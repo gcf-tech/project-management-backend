@@ -31,6 +31,7 @@ from app.api.dependencies import get_db
 from app.db.database import SessionLocal
 from app.core.security import get_nc_user_info
 from app.services.nextcloud_svc import push_nc_notification
+from app.services.push import enviar_push  # push nativo selectivo (menciones + due_soon)
 from app.core import i18n
 from app.services.email_svc import send_email, build_notification_email
 from app.core import config
@@ -1650,7 +1651,14 @@ async def patch_card(
                       notif_vars={"actor": user.display_name})
     db.commit()
     db.refresh(card)
-    return _serialize_card(card, full=True)
+    result = _serialize_card(card, full=True)
+    # Si es subtarea y cambió su fecha, el padre pudo re-derivar su vencimiento:
+    # devolvemos su estado nuevo para que el front lo refleje sin recargar.
+    if card.parent_card_id and "dueDate" in fields_set:
+        parent = db.query(DeckCard).filter(DeckCard.id == card.parent_card_id).first()
+        if parent:
+            result["parentUpdate"] = _serialize_card(parent, full=True)
+    return result
 
 
 @router.post("/cards/{card_id}/move")
@@ -2106,6 +2114,18 @@ async def add_comment(
                         extra_recipients=set(body.mentions or []))
     db.commit()
     await _dispatch_external(db, authorization, act.id)
+    # Push nativo SOLO a los mencionados (no a todos los seguidores del comentario).
+    for uid in set(body.mentions or []):
+        if uid == user.id:
+            continue
+        try:
+            enviar_push(
+                db, uid, "GCF · Deck",
+                f"{user.display_name} te mencionó en un comentario",
+                url="https://deck.gcf.group/app/", tag=f"deck-mention-{card_id}",
+            )
+        except Exception:
+            pass
     db.refresh(comment)
     return _serialize_comment(comment, linked)
 
@@ -2598,6 +2618,7 @@ def _ensure_due_soon_notifications(db: Session, user: User) -> None:
         )
     ).all()
     changed = False
+    nuevas = []  # cards recién avisadas → push nativo tras el commit
     for card in cards:
         # Dedup against ANY existing due_soon for this card+user (read or unread)
         # so a dismissed reminder is not regenerated on every poll.
@@ -2616,8 +2637,19 @@ def _ensure_due_soon_notifications(db: Session, user: User) -> None:
             is_read=False, created_at=utc_now(),
         ))
         changed = True
+        nuevas.append(card)
     if changed:
         db.commit()
+        # Push nativo: se crea UNA sola vez por card+user (por el dedup de arriba).
+        for card in nuevas:
+            try:
+                enviar_push(
+                    db, user.id, "GCF · Deck",
+                    i18n.t(user.lang, "notif.due_soon", title=card.title),
+                    url="https://deck.gcf.group/app/", tag=f"deck-due-{card.id}",
+                )
+            except Exception:
+                pass
 
 
 @router.get("/notifications")

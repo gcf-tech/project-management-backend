@@ -1160,6 +1160,22 @@ class WorkspacePushSubscription(Base):
     auth = Column(String(255), nullable=False)     # secreto de autenticación
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
+
+class WorkspaceUserToken(Base):
+    """Access token de Nextcloud cacheado (CIFRADO) para poder consultar Talk en
+    nombre del usuario y mandarle push de mensajes con la app cerrada. NO se guarda
+    el refresh token (el cliente lo rota; un segundo refrescador rompería su login).
+    El token caduca solo (~1h): la ventana de push de Talk es ese lapso desde la
+    última actividad. `talk_seen` es un JSON {roomToken: lastMessageId} para no
+    repetir avisos. `updated_at` sirve de heurística de 'app activa'."""
+    __tablename__ = "workspace_user_token"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    access_token_enc = Column(Text, nullable=False)      # token cifrado (Fernet)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    talk_seen = Column(Text, nullable=True)              # JSON {roomToken: lastMsgId}
+    updated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
 # ── Pegar al final de app/db/models.py ──────────────────────────────────────
 # (Base, utc_now, Column, Integer, String, DECIMAL, Boolean, Text, DateTime e
 #  Index ya están importados en ese archivo — no hace falta añadir imports.)
