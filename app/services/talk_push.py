@@ -87,10 +87,12 @@ async def _barrido() -> None:
     db = SessionLocal()
     try:
         ahora = utc_now()
-        umbral = ahora - timedelta(seconds=INACTIVO_S)
+        # Se notifica SIEMPRE que haya un mensaje nuevo y el token siga vivo, sin
+        # importar si tienes otro dispositivo abierto (p.ej. el PC): el heurístico
+        # de "app cerrada" era por-usuario (una sola fila) y no distinguía "celu
+        # cerrado pero PC abierto", así que suprimía el push que sí quieres al celu.
         rows = (db.query(WorkspaceUserToken)
                 .filter(WorkspaceUserToken.expires_at > ahora)
-                .filter(WorkspaceUserToken.updated_at < umbral)
                 .all())
         if not rows:
             return
