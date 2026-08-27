@@ -45,8 +45,7 @@ async def _procesar_usuario(db, _talk, row) -> None:
 
     cambiado = False
     nuevos = 0
-    ultimo_texto = ""
-    ultimo_autor = ""
+    top = None  # conversación con el mensaje sin leer más reciente
     for r in (data or []):
         tk = r.get("token")
         lm = r.get("lastMessage")
@@ -58,21 +57,27 @@ async def _procesar_usuario(db, _talk, row) -> None:
         # mensaje nuevo, sin leer, no de sistema (unread>0 ya implica que es de otros)
         if not primera_vez and unread > 0 and mid > prev and not lm.get("systemMessage"):
             nuevos += unread
-            ultimo_texto = lm.get("message") or ""
-            ultimo_autor = lm.get("actorDisplayName") or "Alguien"
+            es_grupo = r.get("type") != 1  # type 1 = 1:1
+            autor = lm.get("actorDisplayName") or "Alguien"
+            # en grupo mostramos "Sala: Autor"; en 1:1 solo el autor
+            titulo_conv = f"{r.get('displayName')}" if es_grupo and r.get("displayName") else autor
+            if top is None or mid > top["mid"]:
+                top = {"mid": mid, "token": tk, "titulo": titulo_conv,
+                       "autor": autor, "texto": lm.get("message") or "", "grupo": es_grupo}
         if mid and mid != prev:
             seen[tk] = mid
             cambiado = True
 
-    if nuevos > 0:
-        if nuevos == 1:
-            titulo = f"💬 {ultimo_autor}"
-            cuerpo = ultimo_texto[:140] or "Te escribió por Talk"
-        else:
-            titulo = f"💬 {nuevos} mensajes nuevos"
-            cuerpo = "Tienes mensajes sin leer en Talk"
+    if top:
+        # título = quién/qué conversación; cuerpo = el texto (en grupo, "Autor: texto")
+        titulo = f"💬 {top['titulo']}"
+        cuerpo = (f"{top['autor']}: {top['texto']}" if top["grupo"] else top["texto"]).strip()
+        cuerpo = cuerpo[:140] or "Te escribió por Talk"
+        if nuevos > 1:
+            cuerpo = f"{cuerpo}  ·  +{nuevos - 1} más"
         try:
-            enviar_push(db, row.user_id, titulo, cuerpo, url="/", tag="gcf-talk")
+            # deep-link a ESA conversación dentro del workspace (?talk=<token>)
+            enviar_push(db, row.user_id, titulo, cuerpo, url=f"/?talk={top['token']}", tag="gcf-talk")
         except Exception:
             pass
 

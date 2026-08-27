@@ -2120,9 +2120,9 @@ async def add_comment(
             continue
         try:
             enviar_push(
-                db, uid, "GCF · Deck",
-                f"{user.display_name} te mencionó en un comentario",
-                url="https://deck.gcf.group/app/", tag=f"deck-mention-{card_id}",
+                db, uid, "💬 Te mencionaron en el Deck",
+                f"{user.display_name} te mencionó en «{card.title}»",
+                url=f"https://deck.gcf.group/app/?card={card_id}", tag=f"deck-mention-{card_id}",
             )
         except Exception:
             pass
@@ -2644,9 +2644,9 @@ def _ensure_due_soon_notifications(db: Session, user: User) -> None:
         for card in nuevas:
             try:
                 enviar_push(
-                    db, user.id, "GCF · Deck",
+                    db, user.id, "⏰ Card por vencer",
                     i18n.t(user.lang, "notif.due_soon", title=card.title),
-                    url="https://deck.gcf.group/app/", tag=f"deck-due-{card.id}",
+                    url=f"https://deck.gcf.group/app/?card={card.id}", tag=f"deck-due-{card.id}",
                 )
             except Exception:
                 pass
