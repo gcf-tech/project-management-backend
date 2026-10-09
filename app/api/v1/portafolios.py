@@ -4,12 +4,14 @@ Ubicar en app/api/v1/portafolios.py y montar en main.py con:
     from app.api.v1 import ... , portafolios
     app.include_router(portafolios.router, prefix="/api/portafolios")
 """
-from typing import List
+from typing import Annotated, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db, require_user
+from app.core.config import PORTAFOLIOS_ADMIN_GROUP
+from app.core.security import get_nc_user_groups
 from app.db.models import Portafolio, PortafolioRentabilidad, User
 from app.schemas.portafolio_schemas import (
     PortafolioCreate,
@@ -27,14 +29,33 @@ async def require_commercial(user: User = Depends(require_user)) -> User:
     """Acceso a la herramienta de portafolios: equipo comercial.
 
     Gatea por `role_commercial` (campo manual, como en /auth/me): cualquier
-    valor no nulo concede acceso de lectura Y edición. Por decisión del equipo
-    no hay distinción de roles internos — quien entra, consulta y edita.
+    valor no nulo concede acceso de LECTURA. Editar exige además pertenecer al
+    grupo de dirección (ver require_portafolios_admin).
 
     Nota: un admin global de Nextcloud con role_commercial=NULL quedaría fuera.
     Si quieres que los admins siempre entren, añade:  or user.role == "admin".
     """
     if not user.role_commercial:
         raise HTTPException(status_code=403, detail="Solo para el equipo comercial")
+    return user
+
+
+async def require_portafolios_admin(
+    authorization: Annotated[str, Header()],
+    user: User = Depends(require_commercial),
+) -> User:
+    """Edición de portafolios y rentabilidad: solo el grupo de administración.
+
+    Además de ser del equipo comercial, el usuario debe pertenecer al grupo de
+    Nextcloud PORTAFOLIOS_ADMIN_GROUP (por defecto "CEO"). Los grupos se leen
+    en cada escritura, así que quitar a alguien del grupo surte efecto al momento.
+    """
+    groups = await get_nc_user_groups(user.nc_user_id, authorization)
+    if PORTAFOLIOS_ADMIN_GROUP not in groups:
+        raise HTTPException(
+            status_code=403,
+            detail="Solo el equipo de dirección puede modificar portafolios",
+        )
     return user
 
 
@@ -65,7 +86,7 @@ def get_portafolio(
 @router.post("", response_model=PortafolioOut, status_code=201)
 def create_portafolio(
     body: PortafolioCreate,
-    _user: User = Depends(require_commercial),
+    _user: User = Depends(require_portafolios_admin),
     db: Session = Depends(get_db),
 ):
     if db.query(Portafolio).filter(Portafolio.nombre == body.nombre).first():
@@ -81,7 +102,7 @@ def create_portafolio(
 def update_portafolio(
     portafolio_id: int,
     body: PortafolioUpdate,
-    _user: User = Depends(require_commercial),
+    _user: User = Depends(require_portafolios_admin),
     db: Session = Depends(get_db),
 ):
     p = db.query(Portafolio).filter(Portafolio.id == portafolio_id).first()
@@ -103,7 +124,7 @@ def update_portafolio(
 @router.delete("/{portafolio_id}", status_code=204)
 def delete_portafolio(
     portafolio_id: int,
-    _user: User = Depends(require_commercial),
+    _user: User = Depends(require_portafolios_admin),
     db: Session = Depends(get_db),
 ):
     """Borrado definitivo. Para ocultar sin borrar, usa PATCH con activo=False."""
@@ -139,7 +160,7 @@ def guardar_anio(
     portafolio_id: int,
     anio: int,
     body: RentabilidadYearIn,
-    _user: User = Depends(require_commercial),
+    _user: User = Depends(require_portafolios_admin),
     db: Session = Depends(get_db),
 ):
     if not db.query(Portafolio).filter(Portafolio.id == portafolio_id).first():
@@ -190,7 +211,7 @@ def guardar_anio(
 def borrar_anio(
     portafolio_id: int,
     anio: int,
-    _user: User = Depends(require_commercial),
+    _user: User = Depends(require_portafolios_admin),
     db: Session = Depends(get_db),
 ):
     db.query(PortafolioRentabilidad).filter(

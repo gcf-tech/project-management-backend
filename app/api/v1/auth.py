@@ -4,7 +4,7 @@ from typing import Annotated
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.core.config import NC_URL, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_CLIENTS
-from app.core.security import get_nc_user_info
+from app.core.security import get_nc_user_info, get_nc_user_groups
 from app.services.nextcloud_svc import sync_user_from_nextcloud
 from app.schemas.user_schemas import OAuthCallback
 from app.api.dependencies import get_db
@@ -96,6 +96,13 @@ async def get_me(
     nc_data = await get_nc_user_info(authorization)
     user = await sync_user_from_nextcloud(db, nc_data, authorization)
 
+    # Grupos de Nextcloud: los clientes los usan para mostrar u ocultar
+    # secciones (p. ej. Performance/Manage en portafolios solo para CEO).
+    # /cloud/user ya los trae; si no, se piden aparte.
+    groups = nc_data.get("groups")
+    if not isinstance(groups, list):
+        groups = await get_nc_user_groups(nc_data["id"], authorization)
+
     displayname = nc_data.get("displayname", nc_data["id"])
     parts = displayname.split()
     initials = "".join(p[0].upper() for p in parts[:2]) if parts else "U"
@@ -107,4 +114,5 @@ async def get_me(
         "initials": initials,
         "role": user.role_commercial or "member",  # Use role_commercial for frontend
         "teamId": user.team_id,
+        "groups": groups,
     }

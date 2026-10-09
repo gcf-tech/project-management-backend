@@ -113,3 +113,8 @@ EMAIL_ENABLED = bool(SMTP_USER and SMTP_PASSWORD)
 # comentarios. Crear una API key en GCP restringida a "Cloud Translation API".
 GOOGLE_TRANSLATE_API_KEY = os.getenv("GOOGLE_TRANSLATE_API_KEY", "")
 TRANSLATE_ENABLED = bool(GOOGLE_TRANSLATE_API_KEY)
+
+# --- Herramienta de portafolios (portfolios.gcf.group) ---
+# Grupo de Nextcloud que puede editar portafolios y su rentabilidad mensual.
+# El resto del equipo comercial solo consulta.
+PORTAFOLIOS_ADMIN_GROUP = os.getenv("PORTAFOLIOS_ADMIN_GROUP", "CEO")
