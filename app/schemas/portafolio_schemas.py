@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -73,5 +73,32 @@ class RentabilidadYearIn(BaseModel):
     """Guarda un año completo. Envía los meses a fijar; un mes en null (o
     ausente) borra ese mes (queda vacío = cuenta como 0)."""
     meses: Dict[int, Optional[Decimal]]
- 
+
     model_config = ConfigDict(extra="ignore")
+
+
+class RentabilidadIngestItem(BaseModel):
+    """Una celda de rentabilidad a escribir: portafolio (por nombre) + valor %."""
+    portafolio: str = Field(min_length=1, max_length=100)
+    valor: Decimal                    # % del mes, admite negativos
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class RentabilidadIngestIn(BaseModel):
+    """Payload del webhook de la plataforma de inversión: la rentabilidad de un
+    mes para uno o más portafolios (mapeados por nombre). Idempotente (upsert)."""
+    anio: int = Field(ge=2000, le=2100)
+    mes: int = Field(ge=1, le=12)
+    items: List[RentabilidadIngestItem]
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class RentabilidadIngestOut(BaseModel):
+    """Resultado de la ingesta: qué portafolios se actualizaron y cuáles no se
+    encontraron por nombre (se ignoran, no fallan la operación)."""
+    anio: int
+    mes: int
+    upserted: List[str]
+    skipped: List[str]

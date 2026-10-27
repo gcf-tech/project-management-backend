@@ -118,3 +118,10 @@ TRANSLATE_ENABLED = bool(GOOGLE_TRANSLATE_API_KEY)
 # Grupo de Nextcloud que puede editar portafolios y su rentabilidad mensual.
 # El resto del equipo comercial solo consulta.
 PORTAFOLIOS_ADMIN_GROUP = os.getenv("PORTAFOLIOS_ADMIN_GROUP", "CEO")
+
+# Secreto compartido con el edge function `reports` de la plataforma de inversión
+# (solo la company que lo configure, p.ej. Capital). Habilita el endpoint de
+# ingesta máquina POST /api/portafolios/rentabilidad/ingest, que escribe la
+# rentabilidad mensual automáticamente. Sin él, ese endpoint rechaza todo.
+PORTFOLIO_SYNC_SECRET = os.getenv("PORTFOLIO_SYNC_SECRET", "")
+PORTFOLIO_SYNC_ENABLED = bool(PORTFOLIO_SYNC_SECRET)

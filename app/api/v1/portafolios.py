@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db, require_user
-from app.core.config import PORTAFOLIOS_ADMIN_GROUP
+from app.core.config import PORTAFOLIOS_ADMIN_GROUP, PORTFOLIO_SYNC_SECRET
 from app.core.security import get_nc_user_groups
 from app.db.models import Portafolio, PortafolioRentabilidad, User
 from app.schemas.portafolio_schemas import (
@@ -19,6 +19,8 @@ from app.schemas.portafolio_schemas import (
     PortafolioUpdate,
     RentabilidadYearOut,   # nuevo
     RentabilidadYearIn,
+    RentabilidadIngestIn,
+    RentabilidadIngestOut,
 )
 
 router = APIRouter()
@@ -57,6 +59,18 @@ async def require_portafolios_admin(
             detail="Solo el equipo de dirección puede modificar portafolios",
         )
     return user
+
+
+def require_sync_secret(
+    x_sync_secret: Annotated[str | None, Header()] = None,
+) -> None:
+    """Auth máquina para el webhook de rentabilidad (no usa Nextcloud).
+
+    La feature se activa por configuración: si PORTFOLIO_SYNC_SECRET no está
+    seteado (la mayoría de los deployments), el endpoint rechaza todo. Solo la
+    company que configure el secreto (p.ej. Capital) puede ingestar."""
+    if not PORTFOLIO_SYNC_SECRET or x_sync_secret != PORTFOLIO_SYNC_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid sync secret")
 
 
 @router.get("", response_model=List[PortafolioOut])
@@ -219,3 +233,49 @@ def borrar_anio(
         PortafolioRentabilidad.anio == anio,
     ).delete(synchronize_session=False)
     db.commit()
+
+
+@router.post("/rentabilidad/ingest", response_model=RentabilidadIngestOut)
+def ingest_rentabilidad(
+    body: RentabilidadIngestIn,
+    _ok: None = Depends(require_sync_secret),
+    db: Session = Depends(get_db),
+):
+    """Ingesta máquina de la rentabilidad mensual desde la plataforma de
+    inversión (webhook del edge function `reports`). Mapea cada item al
+    portafolio por nombre (case-insensitive) y hace upsert de la celda
+    (portafolio, año, mes). Idempotente: reenviar el mismo mes no duplica.
+    Los nombres no encontrados se ignoran (van en `skipped`), no fallan."""
+    upserted: list[str] = []
+    skipped: list[str] = []
+    for item in body.items:
+        p = (
+            db.query(Portafolio)
+            .filter(Portafolio.nombre.ilike(item.portafolio.strip()))
+            .first()
+        )
+        if not p:
+            skipped.append(item.portafolio)
+            continue
+        fila = (
+            db.query(PortafolioRentabilidad)
+            .filter(
+                PortafolioRentabilidad.portafolio_id == p.id,
+                PortafolioRentabilidad.anio == body.anio,
+                PortafolioRentabilidad.mes == body.mes,
+            )
+            .first()
+        )
+        if fila is not None:
+            fila.valor = item.valor
+        else:
+            db.add(
+                PortafolioRentabilidad(
+                    portafolio_id=p.id, anio=body.anio, mes=body.mes, valor=item.valor
+                )
+            )
+        upserted.append(p.nombre)
+    db.commit()
+    return RentabilidadIngestOut(
+        anio=body.anio, mes=body.mes, upserted=upserted, skipped=skipped
+    )
