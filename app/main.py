@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
-from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router, calendar, reports, commercial, assessment, deck, workspace, workspace_assistant, portafolios
+from app.api.v1 import auth, tasks, metrics, teams, weekly, config_router, calendar, reports, commercial, assessment, deck, workspace, workspace_assistant, portafolios, deck_ai
 from app.services.assistant_reminders import bucle_recordatorios
 from app.services.deck_push import bucle_push_deck
 from app.services.talk_push import bucle_talk_push
@@ -75,6 +75,9 @@ app.include_router(reports.router,      prefix="/api/v1")
 app.include_router(commercial.router,   prefix="/api/commercial")
 app.include_router(assessment.router,   prefix="/api/assessment")
 app.include_router(deck.router,         prefix="/api/decks")  # /api/deck is a legacy NC-proxy in teams.py
+# Planificación asistida por IA del Deck (módulo del trabajo de grado). Router
+# aparte para no tocar deck.py; comparte sus helpers de auth/contexto.
+app.include_router(deck_ai.router,      prefix="/api/decks/ai")
 app.include_router(workspace.router,    prefix="/api/workspace")
 # No se solapa con /api/workspace: aquel no define rutas "assistant/…"
 app.include_router(workspace_assistant.router, prefix="/api/workspace/assistant")

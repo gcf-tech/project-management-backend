@@ -1367,3 +1367,73 @@ class WorkspaceAssistantMessage(Base):
         # Se leen siempre todos los de un hilo, en orden de llegada.
         Index("idx_ws_asst_msg_hilo", "hilo_id", "id"),
     )
+
+
+# ============================================================
+# DECK · PLANIFICACIÓN ASISTIDA POR IA (trabajo de grado AI-StorySense)
+# ============================================================
+
+class DeckAiProposal(Base):
+    """Propuesta de proyecto generada por la IA a partir de una descripción.
+    NUNCA escribe en deck_cards por sí sola: solo al aprobarse (status=approved)
+    se crean la tarjeta padre y las subtareas, y `parent_card_id` queda enlazado.
+    `payload_ai` es la salida original del modelo (inmutable); `payload_final`
+    es la versión editada por el humano. La diferencia entre ambas es la métrica
+    de ediciones manuales."""
+    __tablename__ = "deck_ai_proposals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    board_id = Column(Integer, ForeignKey("deck_boards.id", ondelete="CASCADE"), nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    input_text = Column(Text, nullable=False)                 # descripción del proyecto
+    input_kind = Column(String(10), nullable=False, default="text", server_default="text")  # text | audio
+    context_mode = Column(String(10), nullable=False, default="full", server_default="full")  # full | none
+    model = Column(String(80), nullable=True)
+    # generated → (edited)* → approved | discarded  (ciclo de vida de la Figura 4.3)
+    status = Column(String(20), nullable=False, default="draft", server_default="draft")  # draft | approved | discarded
+    payload_ai = Column(JSON, nullable=False)                 # propuesta original de la IA
+    payload_final = Column(JSON, nullable=True)               # propuesta editada / aprobada
+    context_snapshot = Column(JSON, nullable=True)            # contexto usado (reproducibilidad)
+    validation_warnings = Column(JSON, nullable=True)         # ajustes de la validación programática
+    prompt_tokens = Column(Integer, nullable=True)
+    completion_tokens = Column(Integer, nullable=True)
+    regenerations = Column(Integer, nullable=False, default=0, server_default="0")
+    manual_edits = Column(JSON, nullable=True)                # conteo por campo (count_manual_edits)
+    parent_card_id = Column(Integer, ForeignKey("deck_cards.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+
+    board = relationship("DeckBoard")
+    creator = relationship("User", foreign_keys=[created_by])
+    parent_card = relationship("DeckCard", foreign_keys=[parent_card_id])
+    events = relationship("DeckAiProposalEvent", cascade="all, delete-orphan",
+                          back_populates="proposal", order_by="DeckAiProposalEvent.created_at")
+
+    __table_args__ = (
+        Index("idx_deck_ai_prop_board", "board_id"),
+        Index("idx_deck_ai_prop_status", "status"),
+    )
+
+
+class DeckAiProposalEvent(Base):
+    """Trazabilidad de las intervenciones humanas (4.4.4 del documento): quién,
+    cuándo, de qué estado a cuál, y con qué feedback."""
+    __tablename__ = "deck_ai_proposal_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    proposal_id = Column(Integer, ForeignKey("deck_ai_proposals.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    event = Column(String(20), nullable=False)   # generated | edited | regenerated | approved | discarded
+    from_status = Column(String(20), nullable=True)
+    to_status = Column(String(20), nullable=True)
+    feedback = Column(Text, nullable=True)
+    detail = Column(JSON, nullable=True)          # p. ej. conteo de ediciones de esa intervención
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+    proposal = relationship("DeckAiProposal", back_populates="events")
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("idx_deck_ai_evt_prop", "proposal_id"),
+    )

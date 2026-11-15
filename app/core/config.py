@@ -118,3 +118,17 @@ TRANSLATE_ENABLED = bool(GOOGLE_TRANSLATE_API_KEY)
 # Grupo de Nextcloud que puede editar portafolios y su rentabilidad mensual.
 # El resto del equipo comercial solo consulta.
 PORTAFOLIOS_ADMIN_GROUP = os.getenv("PORTAFOLIOS_ADMIN_GROUP", "CEO")
+
+# ── Planificación asistida por IA (Deck) — trabajo de grado AI-StorySense ────
+# Proveedor y modelo. Solo "openai" por ahora (la abstracción en ai_svc.py admite
+# otros). La clave va ÚNICAMENTE en variables de entorno (Dokploy / .env local).
+AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").lower()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+AI_MODEL = os.getenv("AI_MODEL", "gpt-4o")   # gpt-4o-mini imitaba la regla de citar sin analogía real (prueba 2026-11-15)
+AI_TEMPERATURE = float(os.getenv("AI_TEMPERATURE", "0.2"))   # conservadora (validez interna)
+AI_TIMEOUT_S = float(os.getenv("AI_TIMEOUT_S", "90"))
+AI_ENABLED = bool(OPENAI_API_KEY)
+# Feature flag: el módulo solo se ofrece en estos tableros (ids separados por coma).
+# Vacío = todos los tableros. Permite probar en la URL de pruebas sin exponerlo
+# al resto de la empresa aunque compartan base de datos.
+AI_PLANNING_BOARD_IDS = {int(x) for x in os.getenv("AI_PLANNING_BOARD_IDS", "").replace(" ", "").split(",") if x.isdigit()}

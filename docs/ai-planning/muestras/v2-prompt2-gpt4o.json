@@ -1,0 +1,1062 @@
+{
+  "board_id": 1,
+  "input_text": "Necesitamos un módulo de reportes automáticos para el Deck: cada lunes se debe generar un informe por equipo con las tarjetas completadas, las vencidas y la carga de cada persona, y poderlo ver en PDF. Debe poder configurarse desde el panel de administración (día, hora, destinatarios) y tener una vista previa en la app antes de enviarlo. Incluye exportación a PDF y debe respetar el idioma de cada usuario.",
+  "context": {
+    "board": {
+      "id": 1,
+      "title": "Tech Board",
+      "team": "Tech"
+    },
+    "columns": [
+      {
+        "id": 1,
+        "title": "Creación",
+        "position": 0
+      },
+      {
+        "id": 2,
+        "title": "Prototipado/Diseño",
+        "position": 1
+      },
+      {
+        "id": 15,
+        "title": "Revisión",
+        "position": 2
+      },
+      {
+        "id": 16,
+        "title": "Desarrollo/Ejecución",
+        "position": 3
+      },
+      {
+        "id": 29,
+        "title": "Testing interno",
+        "position": 4
+      },
+      {
+        "id": 30,
+        "title": "Testing externo",
+        "position": 5
+      },
+      {
+        "id": 31,
+        "title": "Documentación",
+        "position": 6
+      },
+      {
+        "id": 32,
+        "title": "Lanzamiento",
+        "position": 7
+      }
+    ],
+    "members": [
+      {
+        "id": 18,
+        "name": "Cesar Velasquez",
+        "job_title": "Full Stack Engineer / Ingeniero Desarrollador Full Stack / Tecnología",
+        "team": "Tech",
+        "same_team": true,
+        "role": "admin",
+        "completed_count": 6,
+        "completed_on_board": 5,
+        "open_count": 9,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "Mover un poco a la derecha el componente con el email para que no se sobreponga…",
+          "Link de Tiktok no lleva a perfil de QQ Capital Fund",
+          "Link de Sign up lleva a error 404",
+          "Ajustes en Web de Insurance",
+          "Copy Trader",
+          "Dashboard QQGG - Clientes"
+        ]
+      },
+      {
+        "id": 5,
+        "name": "Juan Florez",
+        "job_title": "Chief Technology Officer - CTO / Director de Tecnología / Tecnología",
+        "team": "Tech",
+        "same_team": true,
+        "role": "admin",
+        "completed_count": 13,
+        "completed_on_board": 4,
+        "open_count": 7,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "Investigación de generación de Leads",
+          "Nuevo Home para el Portal (Habbo)",
+          "CRM tipo GHL",
+          "Project/Activity tracker (new Deck)",
+          "Actualizar base de Empleados",
+          "Cambiar logo al hacer busqueda, aparece lovable."
+        ]
+      },
+      {
+        "id": 1,
+        "name": "Marcela Mazo",
+        "job_title": "Full Stack Engineer / Ingeniero Desarrollador Full Stack / Tecnología",
+        "team": "Tech",
+        "same_team": true,
+        "role": "member",
+        "completed_count": 76,
+        "completed_on_board": 74,
+        "open_count": 38,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "Se requiere que las operaciones se numeren de forma correlativa dentro de cada …",
+          "Se desea corregir un error sin borrar nada: que el sistema genere la operación …",
+          "Se requiere que el sistema guarde qué pago canceló qué factura, para poder ver …",
+          "Se requiere que cada línea de asiento nazca con su campo de moneda y su campo d…",
+          "Se requiere registrar cada operación por partida doble y que el sistema impida …",
+          "Se desea crear cuentas nuevas, colgarlas de una existente y desactivar las que …"
+        ]
+      },
+      {
+        "id": 2,
+        "name": "Santiago Gutierrez",
+        "job_title": "Infrastructure & Support Engineer / Ingeniero de Infraestructura / Tecnología",
+        "team": "Tech",
+        "same_team": true,
+        "role": "member",
+        "completed_count": 4,
+        "completed_on_board": 3,
+        "open_count": 5,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "Aplicacion de google analytics para las landing page",
+          "Migracion de landing page a Astro",
+          "Migración de dominio qqcapitalfund.com",
+          "Rendimientos Septiembre 2026 QQ Capital"
+        ]
+      },
+      {
+        "id": 3,
+        "name": "Santiago Trujillo",
+        "job_title": "Full Stack Engineer / Ingeniero Desarrollador Full Stack / Tecnología",
+        "team": "Tech",
+        "same_team": true,
+        "role": "admin",
+        "completed_count": 45,
+        "completed_on_board": 43,
+        "open_count": 11,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "En la view principal agregar la opción de filtrar por tags",
+          "En Timeline incluir un check filtro para no mostrar tareas ya completadas",
+          "Si una task no tiene End Date pero tiene subtasks, establecer automaticamente e…",
+          "En la columna de Creación, permitir colapsar/expandir las subtasks dentro de su…",
+          "En los comentarios de las tareas detectar cuando existe una url en el texto y t…",
+          "En el talk y cualquier chat, funcionalidad Edit de mensajes enviados"
+        ]
+      },
+      {
+        "id": 17,
+        "name": "Adrianyela Paola Villalobos",
+        "job_title": "Administrative Assistant / Asistente Administrativa / Administración & Finanzas",
+        "team": "Finance / Admin",
+        "same_team": false,
+        "role": "leader",
+        "completed_count": 2,
+        "completed_on_board": 0,
+        "open_count": 2,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "Grabación de videos Insurance",
+          "Guiones nuevos para adrianyela agosto"
+        ]
+      },
+      {
+        "id": 16,
+        "name": "David Enciso",
+        "job_title": "Portfolio Manager - Financial Q Group / Comercial",
+        "team": "Financial Q",
+        "same_team": false,
+        "role": "leader",
+        "completed_count": 29,
+        "completed_on_board": 0,
+        "open_count": 4,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "Revisar y ajustar configuracion de facebook de financial",
+          "6.4 Martes-Sabado Maria: Edición video Autoridad David",
+          "8 Martes Jesus: Seguimiento manual KPI'S e informe semanal",
+          "7 Martes - Domingo Jesús: Publica piezas y videos",
+          "6 Jueves Maria Paz: Edicion de video sintesis artículo",
+          "5 Martes-Viernes David: Grabación de video de Autoridad"
+        ]
+      },
+      {
+        "id": 4,
+        "name": "Edgar Martinez",
+        "job_title": "Chief Operating Officer - COO / Director de Operaciones / Coordinación de Operaciones",
+        "team": "Coordinación",
+        "same_team": false,
+        "role": "admin",
+        "completed_count": 98,
+        "completed_on_board": 4,
+        "open_count": 13,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "Ajustes en Web de Insurance",
+          "Módulos principales: Dashboard, Contacts, Calendar, Marketing",
+          "Nuevo Home para el Portal (Habbo)",
+          "Project/Activity tracker (new Deck)",
+          "Reunión Tech | Mkt Impulsar productos",
+          "Selligent - respuestas PQRS - Llamadas"
+        ]
+      },
+      {
+        "id": 11,
+        "name": "Fabiola Nava",
+        "job_title": "Chief Financial Officer - CFO / Director Financiero / Administración & Finanzas",
+        "team": "Finance / Admin",
+        "same_team": false,
+        "role": "leader",
+        "completed_count": 4,
+        "completed_on_board": 1,
+        "open_count": 1,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "Revisión base de clientes Global WL",
+          "Dashboard QQGG - Clientes",
+          "Mejora de la Plataforma Gali en el area de acreditacion y retiros de saldos",
+          "Implementacion de Tarjeta de Crédito como método de Inversión"
+        ]
+      },
+      {
+        "id": 15,
+        "name": "Jesus Andres Bocanegra Mejia",
+        "job_title": "Creative Graphic Designer / Marketing",
+        "team": "Marketing",
+        "same_team": false,
+        "role": "leader",
+        "completed_count": 185,
+        "completed_on_board": 1,
+        "open_count": 37,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "Ajustes en Web de Insurance",
+          "Reunión Tech | Mkt Impulsar productos",
+          "Estrategia webinar y solucion legal",
+          "Clinica de Ventas",
+          "6ta capacitación",
+          "Pieza Cumpleaños Juan"
+        ]
+      },
+      {
+        "id": 9,
+        "name": "Luis Quintero",
+        "job_title": "Chairman / Global Corporate Finance / Chairman",
+        "team": "Coordinación",
+        "same_team": false,
+        "role": "admin",
+        "completed_count": 6,
+        "completed_on_board": 2,
+        "open_count": 3,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "Ajustes en Web de Insurance",
+          "Project/Activity tracker (new Deck)",
+          "Implementacion de Tarjeta de Crédito como método de Inversión",
+          "Actualización marcas + QTAXPARTNER|",
+          "Business Cards GCF",
+          "Web Insurance"
+        ]
+      },
+      {
+        "id": 8,
+        "name": "Maria Paz Hernandez Barrera",
+        "job_title": "Audio Visual Content Creator & Editor / Marketing",
+        "team": "Marketing",
+        "same_team": false,
+        "role": "leader",
+        "completed_count": 162,
+        "completed_on_board": 0,
+        "open_count": 31,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "Reunión Tech | Mkt Impulsar productos",
+          "Estrategia webinar y solucion legal",
+          "Clinica de Ventas",
+          "6ta capacitación",
+          "Pieza Cumpleaños Juan",
+          "Documentos: plataformas"
+        ]
+      },
+      {
+        "id": 10,
+        "name": "Sebastian Sosa Serrano",
+        "job_title": "Full Stack Engineer / Ingeniero Desarrollador Full Stack / Tecnología",
+        "team": "CriptoX / ONE",
+        "same_team": false,
+        "role": "member",
+        "completed_count": 1,
+        "completed_on_board": 1,
+        "open_count": 2,
+        "hours_logged": 0.0,
+        "recent_completed_titles": [
+          "Funcionalidad Multiples Subtasks"
+        ]
+      }
+    ],
+    "history_projects": [
+      {
+        "id": 536,
+        "title": "Selligents",
+        "description": "Plataforma modular de comunicación y automatización para negocios    https://portal.gcf.group/s/ZDww9ZpyGnQLG84",
+        "created_at": "2026-09-10",
+        "completed": false,
+        "duration_days": null,
+        "subtask_count": 8,
+        "subtasks": [
+          {
+            "title": "Contrucción de Identidad",
+            "assignees": [
+              "Carlos Ocampo",
+              "Jesus Andres Bocanegra Mejia"
+            ],
+            "assignee_ids": [
+              14,
+              15
+            ],
+            "completed": true
+          },
+          {
+            "title": "Generador de video: guardar las piezas de cada organización",
+            "assignees": [],
+            "assignee_ids": [],
+            "completed": true
+          },
+          {
+            "title": "Generador de video: locución con voz sintética",
+            "assignees": [],
+            "assignee_ids": [],
+            "completed": true
+          },
+          {
+            "title": "Generador de video: render del video final",
+            "assignees": [],
+            "assignee_ids": [],
+            "completed": true
+          },
+          {
+            "title": "Generador de video: despliegue en test",
+            "assignees": [],
+            "assignee_ids": [],
+            "completed": true
+          },
+          {
+            "title": "Generador de video: armado automático del guion de montaje",
+            "assignees": [],
+            "assignee_ids": [],
+            "completed": true
+          },
+          {
+            "title": "Generador de video: textos y gráficos en pantalla escritos por el modelo",
+            "assignees": [],
+            "assignee_ids": [],
+            "completed": true
+          },
+          {
+            "title": "Generador de video: pantalla para crear piezas y descargar el resultado",
+            "assignees": [],
+            "assignee_ids": [],
+            "completed": true
+          }
+        ]
+      },
+      {
+        "id": 494,
+        "title": "Endurecimiento",
+        "description": "",
+        "created_at": "2026-09-09",
+        "completed": false,
+        "duration_days": null,
+        "subtask_count": 4,
+        "subtasks": [
+          {
+            "title": "Se requiere poder demostrar que ninguna consulta devuelve datos de otra empresa, en cada …",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          },
+          {
+            "title": "Se desea saber quién hizo qué y cuándo, sin que ese registro pueda alterarse.",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          },
+          {
+            "title": "Se desea poder llevarse todos los datos de la empresa en cualquier momento y sin pedir pe…",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          },
+          {
+            "title": "Se requiere que lo que aún no está construido aparezca desactivado con la razón a la vist…",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          }
+        ]
+      },
+      {
+        "id": 493,
+        "title": "Informes y panel",
+        "description": "",
+        "created_at": "2026-09-09",
+        "completed": false,
+        "duration_days": null,
+        "subtask_count": 4,
+        "subtasks": [
+          {
+            "title": "Se desea ver al entrar cómo va la empresa, qué falta y qué hay que hacer hoy, sin buscar …",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          },
+          {
+            "title": "Se desea obtener el balance y el estado de resultados de cualquier periodo sin exportar a…",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          },
+          {
+            "title": "Se requiere que cualquier cifra de cualquier informe lleve, en un paso, a las operaciones…",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          },
+          {
+            "title": "Se desea exportar cualquier informe a hoja de cálculo y a documento imprimible sin perder…",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          }
+        ]
+      },
+      {
+        "id": 492,
+        "title": "Bancos",
+        "description": "",
+        "created_at": "2026-09-09",
+        "completed": false,
+        "duration_days": null,
+        "subtask_count": 6,
+        "subtasks": [
+          {
+            "title": "Se desea dar de alta las cuentas bancarias de la empresa y ver el saldo de cada una.",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          },
+          {
+            "title": "Se requiere conectar la cuenta del banco desde el propio producto, autorizando el acceso …",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          },
+          {
+            "title": "Se desea que los movimientos del banco entren solos cada día y que ninguno se duplique.",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          },
+          {
+            "title": "Se desea poder importar el extracto manualmente cuando el banco no esté disponible por la…",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          },
+          {
+            "title": "Se desea que el sistema proponga, para cada movimiento del banco, las operaciones ya regi…",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          },
+          {
+            "title": "Se desea definir reglas para los movimientos que se repiten cada mes y no volver a clasif…",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          }
+        ]
+      },
+      {
+        "id": 378,
+        "title": "Plataforma modular para brokers",
+        "description": "Convertir tres aplicaciones que hoy son independientes en una plataforma donde cada producto es un módulo que se activa o desactiva según lo pactado con cada broker, sin bifurcar el código ni mantener versiones a medida.",
+        "created_at": "2026-08-20",
+        "completed": false,
+        "duration_days": null,
+        "subtask_count": 8,
+        "subtasks": [
+          {
+            "title": "Contratos",
+            "assignees": [
+              "Cesar Velasquez"
+            ],
+            "assignee_ids": [
+              18
+            ],
+            "completed": false
+          },
+          {
+            "title": "Nucleo",
+            "assignees": [
+              "Cesar Velasquez"
+            ],
+            "assignee_ids": [
+              18
+            ],
+            "completed": false
+          },
+          {
+            "title": "Gateway MT5",
+            "assignees": [
+              "Cesar Velasquez"
+            ],
+            "assignee_ids": [
+              18
+            ],
+            "completed": false
+          },
+          {
+            "title": "Modulo WL",
+            "assignees": [
+              "Cesar Velasquez"
+            ],
+            "assignee_ids": [
+              18
+            ],
+            "completed": false
+          },
+          {
+            "title": "Modulo Copytrading",
+            "assignees": [
+              "Cesar Velasquez"
+            ],
+            "assignee_ids": [
+              18
+            ],
+            "completed": false
+          },
+          {
+            "title": "Modulo Terminal",
+            "assignees": [
+              "Cesar Velasquez"
+            ],
+            "assignee_ids": [
+              18
+            ],
+            "completed": false
+          },
+          {
+            "title": "Empaquetado",
+            "assignees": [
+              "Cesar Velasquez"
+            ],
+            "assignee_ids": [
+              18
+            ],
+            "completed": false
+          },
+          {
+            "title": "Submodulo de trading - Terminal",
+            "assignees": [
+              "Cesar Velasquez"
+            ],
+            "assignee_ids": [
+              18
+            ],
+            "completed": false
+          }
+        ]
+      },
+      {
+        "id": 332,
+        "title": "Ajustes en Home page de Capital Fund",
+        "description": "",
+        "created_at": "2026-08-17",
+        "completed": false,
+        "duration_days": null,
+        "subtask_count": 3,
+        "subtasks": [
+          {
+            "title": "Link de Sign up lleva a error 404",
+            "assignees": [
+              "Cesar Velasquez"
+            ],
+            "assignee_ids": [
+              18
+            ],
+            "completed": true
+          },
+          {
+            "title": "Link de Tiktok no lleva a perfil de QQ Capital Fund",
+            "assignees": [
+              "Cesar Velasquez"
+            ],
+            "assignee_ids": [
+              18
+            ],
+            "completed": true
+          },
+          {
+            "title": "Mover un poco a la derecha el componente con el email para que no se sobreponga sobre los…",
+            "assignees": [
+              "Cesar Velasquez"
+            ],
+            "assignee_ids": [
+              18
+            ],
+            "completed": true
+          }
+        ]
+      },
+      {
+        "id": 304,
+        "title": "Modificaciones y Mejoras al Portal Home (Habbo)",
+        "description": "",
+        "created_at": "2026-08-11",
+        "completed": false,
+        "duration_days": null,
+        "subtask_count": 10,
+        "subtasks": [
+          {
+            "title": "Sala de reuniones dinámicas",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "News en cada oficina",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "El avatar no se guarda entre cada sesión",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "Investigación y desarrollo sobre sesión del nextcloud en Workspace",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "Manejo de idiomas (en/es)",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": false
+          },
+          {
+            "title": "Cambiar favicon del workspace",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "Banner que despliegue el contenido de una noticia",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "Archivos adjuntos en Talk y links en reuniones no permiten abrirse dando click",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "En el talk y cualquier chat, funcionalidad Edit de mensajes enviados",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "Implementar capacidades PWA para permitir envío de notificaciones push en diferentes disp…",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": false
+          }
+        ]
+      },
+      {
+        "id": 211,
+        "title": "Funcionalidad bitacora comercial que permita nutrir base de datos y logs de cualquier interacción c…",
+        "description": "",
+        "created_at": "2026-07-30",
+        "completed": false,
+        "duration_days": null,
+        "subtask_count": 1,
+        "subtasks": [
+          {
+            "title": "Interaccion con clientes",
+            "assignees": [
+              "Santiago Trujillo",
+              "Edgar Martinez"
+            ],
+            "assignee_ids": [
+              3,
+              4
+            ],
+            "completed": true
+          }
+        ]
+      },
+      {
+        "id": 209,
+        "title": "Herramienta para Flujo Comercial (SIC)",
+        "description": "Este proyecto tiene como finalidad generar una herramienta o herramientas tecnologicas para fortalecer el flujo de trabajo comercial y de marketing. Se generó a partir de la revisión del proceso operativo actual expuest…",
+        "created_at": "2026-07-30",
+        "completed": false,
+        "duration_days": null,
+        "subtask_count": 4,
+        "subtasks": [
+          {
+            "title": "Investigación y desarrollo de funcionalidad generadora de Leads (Scrapper)",
+            "assignees": [
+              "David Enciso"
+            ],
+            "assignee_ids": [
+              16
+            ],
+            "completed": false
+          },
+          {
+            "title": "Funcionalidad bitacora comercial que permita nutrir base de datos y logs de cualquier int…",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": false
+          },
+          {
+            "title": "Herramienta para Generación de Contenido",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": false
+          },
+          {
+            "title": "Funcionalidad dashboard de analisis de SEO/GEO",
+            "assignees": [
+              "Marcela Mazo"
+            ],
+            "assignee_ids": [
+              1
+            ],
+            "completed": false
+          }
+        ]
+      },
+      {
+        "id": 198,
+        "title": "Modificaciones y mejoras al Deck",
+        "description": "Esta tarea abarcará la siguiente fase de nuestra nueva herramienta Deck. Incluirá las subtareas que surjan a raíz de los comentarios y las aportaciones que los usuarios hagan mientras la utilizan.",
+        "created_at": "2026-07-28",
+        "completed": false,
+        "duration_days": null,
+        "subtask_count": 16,
+        "subtasks": [
+          {
+            "title": "Funcionalidad de \"Like\" o similar en los comentarios",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "Inicialización de datos de subtareas a partir de la tarea principal",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "Separar las tareas completamente finalizadas en el view de Trabajo",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "Funcionalidad Multiples Subtasks",
+            "assignees": [
+              "Santiago Trujillo",
+              "Sebastian Sosa Serrano"
+            ],
+            "assignee_ids": [
+              3,
+              10
+            ],
+            "completed": true
+          },
+          {
+            "title": "Agregar un check de \"visto\" en cada notificación no leída",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "En view de trabajo mostrar las tareas que \"estoy siguiendo\" en una sección colapsable",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "Translations: Manejo idioma Inglés y Español",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "Agregar sección de Links and Files",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "Los adjuntos tipo pdf e imagenes deben poder previsualizarse (o abrir en new tab) sin nec…",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          },
+          {
+            "title": "Gestión de estados de una tarea",
+            "assignees": [
+              "Santiago Trujillo"
+            ],
+            "assignee_ids": [
+              3
+            ],
+            "completed": true
+          }
+        ]
+      }
+    ],
+    "context_mode": "full",
+    "team_logs_hours": false
+  },
+  "proposal": {
+    "project": {
+      "title": "Módulo de Reportes Automáticos para Deck",
+      "description": "Generar informes automáticos semanales por equipo en PDF, configurables desde el panel de administración."
+    },
+    "tasks": [
+      {
+        "id": "T1",
+        "title": "Generación de informes automáticos semanales",
+        "description": "Crear funcionalidad para generar informes automáticos cada lunes por equipo.",
+        "suggested_assignee_id": 3,
+        "assignee_reasoning": "Funcionalidad Multiples Subtasks",
+        "estimated_hours": 12.0,
+        "confidence": "alta",
+        "reference_project_id": 198,
+        "depends_on": []
+      },
+      {
+        "id": "T2",
+        "title": "Configuración de informes desde el panel de administración",
+        "description": "Permitir configurar día, hora y destinatarios de los informes desde el panel de administración.",
+        "suggested_assignee_id": 1,
+        "assignee_reasoning": "Funcionalidad dashboard de analisis de SEO/GEO",
+        "estimated_hours": 10.0,
+        "confidence": "alta",
+        "reference_project_id": 209,
+        "depends_on": []
+      },
+      {
+        "id": "T3",
+        "title": "Vista previa de informes en la app",
+        "description": "Implementar vista previa de los informes antes de enviarlos.",
+        "suggested_assignee_id": 3,
+        "assignee_reasoning": "En view de trabajo mostrar las tareas que 'estoy siguiendo' en una sección colapsable",
+        "estimated_hours": 8.0,
+        "confidence": "alta",
+        "reference_project_id": 198,
+        "depends_on": [
+          "T1"
+        ]
+      },
+      {
+        "id": "T4",
+        "title": "Exportación de informes a PDF",
+        "description": "Desarrollar funcionalidad para exportar informes a PDF.",
+        "suggested_assignee_id": 1,
+        "assignee_reasoning": "Se desea exportar cualquier informe a hoja de cálculo y a documento imprimible sin perder formato",
+        "estimated_hours": 6.0,
+        "confidence": "alta",
+        "reference_project_id": 493,
+        "depends_on": [
+          "T1"
+        ]
+      },
+      {
+        "id": "T5",
+        "title": "Soporte multilingüe en informes",
+        "description": "Asegurar que los informes respeten el idioma de cada usuario.",
+        "suggested_assignee_id": 3,
+        "assignee_reasoning": "Translations: Manejo idioma Inglés y Español",
+        "estimated_hours": 5.0,
+        "confidence": "alta",
+        "reference_project_id": 198,
+        "depends_on": [
+          "T1"
+        ]
+      }
+    ],
+    "assumptions": [
+      "El sistema actual permite la integración de nuevos módulos sin necesidad de cambios estructurales significativos.",
+      "El panel de administración ya tiene capacidad para manejar configuraciones de usuario."
+    ],
+    "risks": [
+      "Posible incompatibilidad con versiones anteriores del sistema al integrar el nuevo módulo.",
+      "Retrasos en la implementación debido a la carga actual de trabajo del equipo."
+    ]
+  },
+  "warnings": [
+    "T1: la justificación de asignación no cita evidencia del contexto",
+    "T2: la justificación de asignación no cita evidencia del contexto",
+    "T4: la justificación de asignación no cita evidencia del contexto",
+    "T5: la justificación de asignación no cita evidencia del contexto"
+  ],
+  "model": "gpt-4o-2024-08-06",
+  "usage": {
+    "prompt_tokens": 3982,
+    "completion_tokens": 688
+  }
+}
