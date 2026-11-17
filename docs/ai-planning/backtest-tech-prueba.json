@@ -1,0 +1,1459 @@
+{
+  "board_id": 1,
+  "model": "gpt-4o",
+  "summary": {
+    "full": {
+      "projects": 3,
+      "avg_size_ratio": 0.83,
+      "avg_title_coverage": 0.0,
+      "avg_title_similarity": 0.01,
+      "avg_assignee_pool_precision": 0.0,
+      "avg_assignee_pair_accuracy": null,
+      "dominant_match_rate": 0.0,
+      "total_phase_warnings": 2,
+      "total_evidence_warnings": 2,
+      "avg_unassigned_ai": 0.33,
+      "total_tokens": 15192
+    },
+    "none": {
+      "projects": 3,
+      "avg_size_ratio": 0.88,
+      "avg_title_coverage": 0.04,
+      "avg_title_similarity": 0.03,
+      "avg_assignee_pool_precision": 0.07,
+      "avg_assignee_pair_accuracy": null,
+      "dominant_match_rate": 0.0,
+      "total_phase_warnings": 6,
+      "total_evidence_warnings": 0,
+      "avg_unassigned_ai": 0.33,
+      "total_tokens": 7069
+    }
+  },
+  "rows": [
+    {
+      "project_id": 705,
+      "project": "Proyecto Cryptox",
+      "mode": "full",
+      "model": "gpt-4o-2024-08-06",
+      "prompt_tokens": 4760,
+      "completion_tokens": 809,
+      "n_real": 8,
+      "n_ai": 8,
+      "size_ratio": 1.0,
+      "title_coverage": 0.0,
+      "title_similarity": 0.03,
+      "assignee_pool_precision": null,
+      "assignee_pair_accuracy": null,
+      "dominant_match": null,
+      "phase_warnings": 0,
+      "evidence_warnings": 0,
+      "unassigned_ai": 0
+    },
+    {
+      "project_id": 705,
+      "project": "Proyecto Cryptox",
+      "mode": "none",
+      "model": "gpt-4o-2024-08-06",
+      "prompt_tokens": 2204,
+      "completion_tokens": 765,
+      "n_real": 8,
+      "n_ai": 7,
+      "size_ratio": 0.88,
+      "title_coverage": 0.12,
+      "title_similarity": 0.1,
+      "assignee_pool_precision": null,
+      "assignee_pair_accuracy": null,
+      "dominant_match": null,
+      "phase_warnings": 2,
+      "evidence_warnings": 0,
+      "unassigned_ai": 1
+    },
+    {
+      "project_id": 536,
+      "project": "Selligents",
+      "mode": "full",
+      "model": "gpt-4o-2024-08-06",
+      "prompt_tokens": 4047,
+      "completion_tokens": 806,
+      "n_real": 8,
+      "n_ai": 6,
+      "size_ratio": 0.75,
+      "title_coverage": 0.0,
+      "title_similarity": 0.0,
+      "assignee_pool_precision": 0.0,
+      "assignee_pair_accuracy": null,
+      "dominant_match": 0,
+      "phase_warnings": 1,
+      "evidence_warnings": 2,
+      "unassigned_ai": 0
+    },
+    {
+      "project_id": 536,
+      "project": "Selligents",
+      "mode": "none",
+      "model": "gpt-4o-2024-08-06",
+      "prompt_tokens": 1421,
+      "completion_tokens": 541,
+      "n_real": 8,
+      "n_ai": 7,
+      "size_ratio": 0.88,
+      "title_coverage": 0.0,
+      "title_similarity": 0.0,
+      "assignee_pool_precision": 0.0,
+      "assignee_pair_accuracy": null,
+      "dominant_match": 0,
+      "phase_warnings": 2,
+      "evidence_warnings": 0,
+      "unassigned_ai": 0
+    },
+    {
+      "project_id": 378,
+      "project": "Plataforma modular para brokers",
+      "mode": "full",
+      "model": "gpt-4o-2024-08-06",
+      "prompt_tokens": 4109,
+      "completion_tokens": 661,
+      "n_real": 8,
+      "n_ai": 6,
+      "size_ratio": 0.75,
+      "title_coverage": 0.0,
+      "title_similarity": 0.0,
+      "assignee_pool_precision": 0.0,
+      "assignee_pair_accuracy": null,
+      "dominant_match": 0,
+      "phase_warnings": 1,
+      "evidence_warnings": 0,
+      "unassigned_ai": 1
+    },
+    {
+      "project_id": 378,
+      "project": "Plataforma modular para brokers",
+      "mode": "none",
+      "model": "gpt-4o-2024-08-06",
+      "prompt_tokens": 1443,
+      "completion_tokens": 695,
+      "n_real": 8,
+      "n_ai": 7,
+      "size_ratio": 0.88,
+      "title_coverage": 0.0,
+      "title_similarity": 0.0,
+      "assignee_pool_precision": 0.14,
+      "assignee_pair_accuracy": null,
+      "dominant_match": 0,
+      "phase_warnings": 2,
+      "evidence_warnings": 0,
+      "unassigned_ai": 0
+    }
+  ],
+  "detail": [
+    {
+      "project_id": 705,
+      "mode": "full",
+      "real": [
+        {
+          "title": "Recuperación y cambio de contraseña",
+          "assignees": []
+        },
+        {
+          "title": "Selector de idioma y tema claro/oscuro",
+          "assignees": []
+        },
+        {
+          "title": "Vista de cliente para operadores",
+          "assignees": []
+        },
+        {
+          "title": "Margen global visible junto al margen del cliente",
+          "assignees": []
+        },
+        {
+          "title": "Conexión del ambiente de pruebas con Ibanera (sandbox)",
+          "assignees": []
+        },
+        {
+          "title": "Operaciones desbloqueadas en el ambiente de pruebas con saldo de Ibanera",
+          "assignees": []
+        },
+        {
+          "title": "Avisos automáticos de Ibanera (webhooks)",
+          "assignees": []
+        },
+        {
+          "title": "Cobertura del plan de pruebas de Ibanera (compra, pagos a terceros, verificación de empresas)",
+          "assignees": []
+        }
+      ],
+      "proposal": {
+        "project": {
+          "title": "Cryptox Platform Development",
+          "description": "Develop Cryptox, a white-label platform for buying, selling, and withdrawing digital dollars and crypto assets with quotes, operator approval, own accounting, and connection to providers like Ibanera."
+        },
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "User Authentication Module",
+            "description": "Implement user authentication with JWT for secure access.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Se requiere que las operaciones se numeren de forma correlativa dentro de cada …\" Marcela ha trabajado en proyectos de seguridad y autenticación, lo cual es crucial para esta tarea.",
+            "estimated_hours": 12.0,
+            "confidence": "alta",
+            "reference_project_id": 492,
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "Crypto Transactions Interface",
+            "description": "Develop interface for buying and selling crypto assets.",
+            "suggested_assignee_id": 18,
+            "assignee_reasoning": "\"Modulo Copytrading\" Cesar ha trabajado en interfaces de trading, relevante para desarrollar la interfaz de transacciones de criptoactivos.",
+            "estimated_hours": 16.0,
+            "confidence": "alta",
+            "reference_project_id": 378,
+            "depends_on": []
+          },
+          {
+            "id": "T3",
+            "title": "Ibanera Integration",
+            "description": "Integrate Ibanera API for transactions and account management.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Se requiere conectar la cuenta del banco desde el propio producto, autorizando el acceso …\" Marcela tiene experiencia en integraciones bancarias, aplicable a Ibanera.",
+            "estimated_hours": 14.0,
+            "confidence": "alta",
+            "reference_project_id": 492,
+            "depends_on": []
+          },
+          {
+            "id": "T4",
+            "title": "Operator Approval Workflow",
+            "description": "Create workflow for operator approval of transactions.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"En la view principal agregar la opción de filtrar por tags\" Santiago ha trabajado en flujos de trabajo y filtros, aplicable al flujo de aprobación.",
+            "estimated_hours": 10.0,
+            "confidence": "alta",
+            "reference_project_id": 304,
+            "depends_on": []
+          },
+          {
+            "id": "T5",
+            "title": "Accounting Module",
+            "description": "Implement accounting features for tracking transactions.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Se requiere que el sistema guarde qué pago canceló qué factura, para poder ver …\" Marcela ha trabajado en módulos de contabilidad, relevante para esta tarea.",
+            "estimated_hours": 18.0,
+            "confidence": "alta",
+            "reference_project_id": 493,
+            "depends_on": []
+          },
+          {
+            "id": "T6",
+            "title": "Provider Connection Setup",
+            "description": "Set up connections to external providers for data and transactions.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Se requiere conectar la cuenta del banco desde el propio producto, autorizando el acceso …\" Marcela tiene experiencia en configuraciones de conexiones externas.",
+            "estimated_hours": 12.0,
+            "confidence": "alta",
+            "reference_project_id": 492,
+            "depends_on": []
+          },
+          {
+            "id": "T7",
+            "title": "Testing and Validation",
+            "description": "Conduct internal and external testing of platform features.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"En Timeline incluir un check filtro para no mostrar tareas ya completadas\" Santiago ha trabajado en pruebas y validaciones, aplicable a esta tarea.",
+            "estimated_hours": 10.0,
+            "confidence": "alta",
+            "reference_project_id": 304,
+            "depends_on": [
+              "T1",
+              "T2",
+              "T3",
+              "T4",
+              "T5",
+              "T6"
+            ]
+          },
+          {
+            "id": "T8",
+            "title": "Documentation and Deployment",
+            "description": "Document features and deploy to production environment.",
+            "suggested_assignee_id": 5,
+            "assignee_reasoning": "\"Actualizar base de Empleados\" Juan ha liderado despliegues y documentación, relevante para esta tarea.",
+            "estimated_hours": 8.0,
+            "confidence": "media",
+            "reference_project_id": 536,
+            "depends_on": [
+              "T7"
+            ]
+          }
+        ],
+        "assumptions": [
+          "The team has access to all necessary credentials and permissions for Ibanera integration."
+        ],
+        "risks": [
+          "Delays in Ibanera API integration could impact project timeline.",
+          "Potential security vulnerabilities if authentication is not implemented correctly."
+        ]
+      },
+      "warnings": [],
+      "pairs": [
+        {
+          "real": "Avisos automáticos de Ibanera (webhooks)",
+          "ai": "Ibanera Integration",
+          "jaccard": 0.2,
+          "real_assignees": [],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Cobertura del plan de pruebas de Ibanera (compra, pagos a terceros, verificación de empresas)",
+          "ai": "Documentation and Deployment",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 5
+        },
+        {
+          "real": "Operaciones desbloqueadas en el ambiente de pruebas con saldo de Ibanera",
+          "ai": "Testing and Validation",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Conexión del ambiente de pruebas con Ibanera (sandbox)",
+          "ai": "Provider Connection Setup",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Margen global visible junto al margen del cliente",
+          "ai": "Accounting Module",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Vista de cliente para operadores",
+          "ai": "Operator Approval Workflow",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Selector de idioma y tema claro/oscuro",
+          "ai": "Crypto Transactions Interface",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 18
+        },
+        {
+          "real": "Recuperación y cambio de contraseña",
+          "ai": "User Authentication Module",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 1
+        }
+      ],
+      "member_names": {
+        "18": "Cesar Velasquez",
+        "5": "Juan Florez",
+        "1": "Marcela Mazo",
+        "2": "Santiago Gutierrez",
+        "3": "Santiago Trujillo",
+        "17": "Adrianyela Paola Villalobos",
+        "16": "David Enciso",
+        "4": "Edgar Martinez",
+        "11": "Fabiola Nava",
+        "15": "Jesus Andres Bocanegra Mejia",
+        "9": "Luis Quintero",
+        "8": "Maria Paz Hernandez Barrera",
+        "10": "Sebastian Sosa Serrano"
+      }
+    },
+    {
+      "project_id": 705,
+      "mode": "none",
+      "real": [
+        {
+          "title": "Recuperación y cambio de contraseña",
+          "assignees": []
+        },
+        {
+          "title": "Selector de idioma y tema claro/oscuro",
+          "assignees": []
+        },
+        {
+          "title": "Vista de cliente para operadores",
+          "assignees": []
+        },
+        {
+          "title": "Margen global visible junto al margen del cliente",
+          "assignees": []
+        },
+        {
+          "title": "Conexión del ambiente de pruebas con Ibanera (sandbox)",
+          "assignees": []
+        },
+        {
+          "title": "Operaciones desbloqueadas en el ambiente de pruebas con saldo de Ibanera",
+          "assignees": []
+        },
+        {
+          "title": "Avisos automáticos de Ibanera (webhooks)",
+          "assignees": []
+        },
+        {
+          "title": "Cobertura del plan de pruebas de Ibanera (compra, pagos a terceros, verificación de empresas)",
+          "assignees": []
+        }
+      ],
+      "proposal": {
+        "project": {
+          "title": "Implementación de Cryptox",
+          "description": "Desarrollar y lanzar Cryptox, una plataforma para transacciones de criptoactivos y dólares digitales con integración a Ibanera."
+        },
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "Implementar compra y venta de criptoactivos",
+            "description": "Desarrollar la funcionalidad de compra y venta de criptoactivos en la plataforma.",
+            "suggested_assignee_id": 18,
+            "assignee_reasoning": "\"feat(trading): implement buy/sell feature\" - Cesar Velasquez trabajó en funcionalidades similares en proyectos anteriores.",
+            "estimated_hours": 20.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "Integración con Ibanera",
+            "description": "Conectar la plataforma con el sandbox de Ibanera para pruebas de transacciones.",
+            "suggested_assignee_id": 10,
+            "assignee_reasoning": "\"feat(integration): connect to Ibanera sandbox\" - Sebastian Sosa Serrano ha trabajado en integraciones similares.",
+            "estimated_hours": 15.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T3",
+            "title": "Desarrollar módulo de cotizaciones",
+            "description": "Crear un módulo para mostrar cotizaciones en tiempo real de criptoactivos.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"feat(pricing): real-time quotes module\" - Marcela Mazo ha desarrollado módulos de cotizaciones en otros proyectos.",
+            "estimated_hours": 18.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T4",
+            "title": "Implementar aprobación por operadores",
+            "description": "Desarrollar la funcionalidad de aprobación de transacciones por operadores.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"feat(approval): operator transaction approval\" - Santiago Trujillo ha trabajado en funcionalidades de aprobación.",
+            "estimated_hours": 12.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T5",
+            "title": "Configurar contabilidad propia",
+            "description": "Implementar un sistema de contabilidad interna para las transacciones.",
+            "suggested_assignee_id": 5,
+            "assignee_reasoning": "\"feat(accounting): internal ledger system\" - Juan Florez tiene experiencia en sistemas de contabilidad.",
+            "estimated_hours": 25.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T6",
+            "title": "Desplegar en ambiente de pruebas",
+            "description": "Configurar y desplegar la plataforma en el ambiente de pruebas usando Dokploy.",
+            "suggested_assignee_id": 2,
+            "assignee_reasoning": "\"chore(deployment): setup testing environment\" - Santiago Gutierrez ha configurado despliegues en ambientes de pruebas.",
+            "estimated_hours": 10.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1",
+              "T2",
+              "T3",
+              "T4",
+              "T5"
+            ]
+          },
+          {
+            "id": "T7",
+            "title": "Documentar funcionalidades de Cryptox",
+            "description": "Crear documentación de usuario y técnica para las funcionalidades de Cryptox.",
+            "suggested_assignee_id": null,
+            "assignee_reasoning": "No hay un miembro específico con experiencia previa en documentación de este tipo.",
+            "estimated_hours": 8.0,
+            "confidence": "baja",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1",
+              "T2",
+              "T3",
+              "T4",
+              "T5"
+            ]
+          }
+        ],
+        "assumptions": [
+          "Se asume que todos los miembros tienen acceso a los repositorios y herramientas necesarias.",
+          "Se asume que las credenciales de Ibanera están correctamente configuradas en los ambientes de pruebas."
+        ],
+        "risks": [
+          "Retrasos en la integración con Ibanera debido a problemas de conexión o credenciales incorrectas.",
+          "Falta de experiencia en documentación podría afectar la calidad de la misma."
+        ]
+      },
+      "warnings": [
+        "T6: 'Desplegar en ambiente de pruebas' parece una fase del ciclo de vida, no una pieza funcional",
+        "T7: 'Documentar funcionalidades de Cryptox' parece una fase del ciclo de vida, no una pieza funcional"
+      ],
+      "pairs": [
+        {
+          "real": "Conexión del ambiente de pruebas con Ibanera (sandbox)",
+          "ai": "Desplegar en ambiente de pruebas",
+          "jaccard": 0.33,
+          "real_assignees": [],
+          "ai_assignee": 2
+        },
+        {
+          "real": "Avisos automáticos de Ibanera (webhooks)",
+          "ai": "Integración con Ibanera",
+          "jaccard": 0.2,
+          "real_assignees": [],
+          "ai_assignee": 10
+        },
+        {
+          "real": "Vista de cliente para operadores",
+          "ai": "Implementar aprobación por operadores",
+          "jaccard": 0.2,
+          "real_assignees": [],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Cobertura del plan de pruebas de Ibanera (compra, pagos a terceros, verificación de empresas)",
+          "ai": "Implementar compra y venta de criptoactivos",
+          "jaccard": 0.08,
+          "real_assignees": [],
+          "ai_assignee": 18
+        },
+        {
+          "real": "Operaciones desbloqueadas en el ambiente de pruebas con saldo de Ibanera",
+          "ai": "Documentar funcionalidades de Cryptox",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": null
+        },
+        {
+          "real": "Margen global visible junto al margen del cliente",
+          "ai": "Configurar contabilidad propia",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 5
+        },
+        {
+          "real": "Selector de idioma y tema claro/oscuro",
+          "ai": "Desarrollar módulo de cotizaciones",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 1
+        }
+      ],
+      "member_names": {
+        "18": "Cesar Velasquez",
+        "5": "Juan Florez",
+        "1": "Marcela Mazo",
+        "2": "Santiago Gutierrez",
+        "3": "Santiago Trujillo",
+        "17": "Adrianyela Paola Villalobos",
+        "16": "David Enciso",
+        "4": "Edgar Martinez",
+        "11": "Fabiola Nava",
+        "15": "Jesus Andres Bocanegra Mejia",
+        "9": "Luis Quintero",
+        "8": "Maria Paz Hernandez Barrera",
+        "10": "Sebastian Sosa Serrano"
+      }
+    },
+    {
+      "project_id": 536,
+      "mode": "full",
+      "real": [
+        {
+          "title": "Contrucción de Identidad",
+          "assignees": [
+            14,
+            15
+          ]
+        },
+        {
+          "title": "Generador de video: guardar las piezas de cada organización",
+          "assignees": []
+        },
+        {
+          "title": "Generador de video: locución con voz sintética",
+          "assignees": []
+        },
+        {
+          "title": "Generador de video: render del video final",
+          "assignees": []
+        },
+        {
+          "title": "Generador de video: despliegue en test",
+          "assignees": []
+        },
+        {
+          "title": "Generador de video: armado automático del guion de montaje",
+          "assignees": []
+        },
+        {
+          "title": "Generador de video: textos y gráficos en pantalla escritos por el modelo",
+          "assignees": []
+        },
+        {
+          "title": "Generador de video: pantalla para crear piezas y descargar el resultado",
+          "assignees": []
+        }
+      ],
+      "proposal": {
+        "project": {
+          "title": "Plataforma Modular Selligents",
+          "description": "Desarrollo de una plataforma modular de comunicación y automatización para negocios."
+        },
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "Módulo de Comunicación",
+            "description": "Desarrollar el módulo de comunicación para la plataforma Selligents.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"En el talk y cualquier chat, funcionalidad Edit de mensajes enviados\". Experiencia en desarrollo de módulos de comunicación.",
+            "estimated_hours": 20.0,
+            "confidence": "alta",
+            "reference_project_id": 378,
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "Módulo de Automatización",
+            "description": "Implementar el módulo de automatización para la plataforma Selligents.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Funcionalidad Multiples Subtasks\". Experiencia en desarrollo de funcionalidades automatizadas.",
+            "estimated_hours": 25.0,
+            "confidence": "alta",
+            "reference_project_id": 198,
+            "depends_on": []
+          },
+          {
+            "id": "T3",
+            "title": "Integración con CRM",
+            "description": "Integrar la plataforma Selligents con sistemas CRM existentes.",
+            "suggested_assignee_id": 5,
+            "assignee_reasoning": "\"CRM tipo GHL\". Experiencia en integración con sistemas CRM.",
+            "estimated_hours": 15.0,
+            "confidence": "alta",
+            "reference_project_id": 209,
+            "depends_on": []
+          },
+          {
+            "id": "T4",
+            "title": "Interfaz de Usuario",
+            "description": "Diseñar y desarrollar la interfaz de usuario de la plataforma Selligents.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Se requiere que las operaciones se numeren de forma correlativa dentro de cada …\". Experiencia en diseño de interfaces de usuario.",
+            "estimated_hours": 30.0,
+            "confidence": "alta",
+            "reference_project_id": 493,
+            "depends_on": []
+          },
+          {
+            "id": "T5",
+            "title": "Configuración de Módulos",
+            "description": "Permitir la activación y desactivación de módulos según necesidades del cliente.",
+            "suggested_assignee_id": 18,
+            "assignee_reasoning": "\"Modulo WL\". Experiencia en configuración modular de plataformas.",
+            "estimated_hours": 18.0,
+            "confidence": "media",
+            "reference_project_id": 378,
+            "depends_on": []
+          },
+          {
+            "id": "T6",
+            "title": "Pruebas de Integración",
+            "description": "Realizar pruebas de integración para asegurar la cohesión entre módulos.",
+            "suggested_assignee_id": 2,
+            "assignee_reasoning": "\"Migración de dominio qqcapitalfund.com\". Experiencia en pruebas de integración y migración.",
+            "estimated_hours": 12.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1",
+              "T2",
+              "T3",
+              "T5"
+            ]
+          }
+        ],
+        "assumptions": [
+          "La plataforma Selligents es un nuevo desarrollo sin historial previo en la organización.",
+          "Los módulos de comunicación y automatización son las funcionalidades principales."
+        ],
+        "risks": [
+          "Integración con CRM puede requerir más tiempo si los sistemas CRM son variados.",
+          "La interfaz de usuario puede necesitar ajustes adicionales según feedback de usuarios."
+        ]
+      },
+      "warnings": [
+        "T5: la justificación no cita ninguna tarea, proyecto o cargo del contexto",
+        "T5: confidence rebajada a media por falta de evidencia verificable",
+        "T6: 'Pruebas de Integración' parece una fase del ciclo de vida, no una pieza funcional"
+      ],
+      "pairs": [
+        {
+          "real": "Generador de video: pantalla para crear piezas y descargar el resultado",
+          "ai": "Pruebas de Integración",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 2
+        },
+        {
+          "real": "Generador de video: textos y gráficos en pantalla escritos por el modelo",
+          "ai": "Configuración de Módulos",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 18
+        },
+        {
+          "real": "Generador de video: armado automático del guion de montaje",
+          "ai": "Interfaz de Usuario",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Generador de video: despliegue en test",
+          "ai": "Integración con CRM",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 5
+        },
+        {
+          "real": "Generador de video: render del video final",
+          "ai": "Módulo de Automatización",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Generador de video: locución con voz sintética",
+          "ai": "Módulo de Comunicación",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 3
+        }
+      ],
+      "member_names": {
+        "18": "Cesar Velasquez",
+        "5": "Juan Florez",
+        "1": "Marcela Mazo",
+        "2": "Santiago Gutierrez",
+        "3": "Santiago Trujillo",
+        "17": "Adrianyela Paola Villalobos",
+        "16": "David Enciso",
+        "4": "Edgar Martinez",
+        "11": "Fabiola Nava",
+        "15": "Jesus Andres Bocanegra Mejia",
+        "9": "Luis Quintero",
+        "8": "Maria Paz Hernandez Barrera",
+        "10": "Sebastian Sosa Serrano"
+      }
+    },
+    {
+      "project_id": 536,
+      "mode": "none",
+      "real": [
+        {
+          "title": "Contrucción de Identidad",
+          "assignees": [
+            14,
+            15
+          ]
+        },
+        {
+          "title": "Generador de video: guardar las piezas de cada organización",
+          "assignees": []
+        },
+        {
+          "title": "Generador de video: locución con voz sintética",
+          "assignees": []
+        },
+        {
+          "title": "Generador de video: render del video final",
+          "assignees": []
+        },
+        {
+          "title": "Generador de video: despliegue en test",
+          "assignees": []
+        },
+        {
+          "title": "Generador de video: armado automático del guion de montaje",
+          "assignees": []
+        },
+        {
+          "title": "Generador de video: textos y gráficos en pantalla escritos por el modelo",
+          "assignees": []
+        },
+        {
+          "title": "Generador de video: pantalla para crear piezas y descargar el resultado",
+          "assignees": []
+        }
+      ],
+      "proposal": {
+        "project": {
+          "title": "Desarrollo de Plataforma Selligents",
+          "description": "Crear una plataforma modular de comunicación y automatización para negocios."
+        },
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "Diseño de arquitectura modular",
+            "description": "Crear diseño de arquitectura para la plataforma modular.",
+            "suggested_assignee_id": 5,
+            "assignee_reasoning": "Chief Technology Officer - CTO / Director de Tecnología",
+            "estimated_hours": 12.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "Desarrollo del módulo de comunicación",
+            "description": "Implementar el módulo de comunicación para la plataforma.",
+            "suggested_assignee_id": 18,
+            "assignee_reasoning": "\"Desarrollo de módulo de comunicación\" en proyecto anterior",
+            "estimated_hours": 20.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T3",
+            "title": "Desarrollo del módulo de automatización",
+            "description": "Implementar el módulo de automatización para la plataforma.",
+            "suggested_assignee_id": 18,
+            "assignee_reasoning": "\"Desarrollo de módulo de automatización\" en proyecto anterior",
+            "estimated_hours": 20.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T4",
+            "title": "Integración de módulos",
+            "description": "Integrar los módulos de comunicación y automatización.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Integración de módulos\" en proyecto anterior",
+            "estimated_hours": 15.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T2",
+              "T3"
+            ]
+          },
+          {
+            "id": "T5",
+            "title": "Pruebas internas de la plataforma",
+            "description": "Realizar pruebas internas de la plataforma completa.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Pruebas internas de plataforma\" en proyecto anterior",
+            "estimated_hours": 10.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T4"
+            ]
+          },
+          {
+            "id": "T6",
+            "title": "Pruebas externas de la plataforma",
+            "description": "Coordinar y ejecutar pruebas externas con usuarios.",
+            "suggested_assignee_id": 2,
+            "assignee_reasoning": "\"Pruebas externas de plataforma\" en proyecto anterior",
+            "estimated_hours": 8.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T5"
+            ]
+          },
+          {
+            "id": "T7",
+            "title": "Documentación de la plataforma",
+            "description": "Crear documentación completa de la plataforma.",
+            "suggested_assignee_id": 17,
+            "assignee_reasoning": "Administrative Assistant / Asistente Administrativa",
+            "estimated_hours": 10.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T6"
+            ]
+          }
+        ],
+        "assumptions": [
+          "Se asume que la plataforma requiere tanto un módulo de comunicación como uno de automatización."
+        ],
+        "risks": [
+          "Integración de módulos puede presentar problemas de compatibilidad.",
+          "Pruebas externas pueden revelar fallos no detectados internamente."
+        ]
+      },
+      "warnings": [
+        "T5: 'Pruebas internas de la plataforma' parece una fase del ciclo de vida, no una pieza funcional",
+        "T6: 'Pruebas externas de la plataforma' parece una fase del ciclo de vida, no una pieza funcional"
+      ],
+      "pairs": [
+        {
+          "real": "Generador de video: pantalla para crear piezas y descargar el resultado",
+          "ai": "Documentación de la plataforma",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 17
+        },
+        {
+          "real": "Generador de video: textos y gráficos en pantalla escritos por el modelo",
+          "ai": "Pruebas externas de la plataforma",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 2
+        },
+        {
+          "real": "Generador de video: armado automático del guion de montaje",
+          "ai": "Pruebas internas de la plataforma",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Generador de video: despliegue en test",
+          "ai": "Integración de módulos",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Generador de video: render del video final",
+          "ai": "Desarrollo del módulo de automatización",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 18
+        },
+        {
+          "real": "Generador de video: locución con voz sintética",
+          "ai": "Desarrollo del módulo de comunicación",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 18
+        },
+        {
+          "real": "Generador de video: guardar las piezas de cada organización",
+          "ai": "Diseño de arquitectura modular",
+          "jaccard": 0.0,
+          "real_assignees": [],
+          "ai_assignee": 5
+        }
+      ],
+      "member_names": {
+        "18": "Cesar Velasquez",
+        "5": "Juan Florez",
+        "1": "Marcela Mazo",
+        "2": "Santiago Gutierrez",
+        "3": "Santiago Trujillo",
+        "17": "Adrianyela Paola Villalobos",
+        "16": "David Enciso",
+        "4": "Edgar Martinez",
+        "11": "Fabiola Nava",
+        "15": "Jesus Andres Bocanegra Mejia",
+        "9": "Luis Quintero",
+        "8": "Maria Paz Hernandez Barrera",
+        "10": "Sebastian Sosa Serrano"
+      }
+    },
+    {
+      "project_id": 378,
+      "mode": "full",
+      "real": [
+        {
+          "title": "Contratos",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Nucleo",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Gateway MT5",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Modulo WL",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Modulo Copytrading",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Modulo Terminal",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Empaquetado",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Submodulo de trading - Terminal",
+          "assignees": [
+            18
+          ]
+        }
+      ],
+      "proposal": {
+        "project": {
+          "title": "Plataforma Modular para Brokers",
+          "description": "Integrar tres aplicaciones independientes en una plataforma modular para brokers, permitiendo activar o desactivar módulos según acuerdos, sin bifurcar el código."
+        },
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "Integración de aplicaciones en plataforma única",
+            "description": "Unificar las tres aplicaciones en una sola plataforma modular.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Se requiere que cada línea de asiento nazca con su campo de moneda y su campo d…\". Experiencia en integración de sistemas complejos.",
+            "estimated_hours": 40.0,
+            "confidence": "alta",
+            "reference_project_id": 106,
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "Desarrollo de sistema de activación de módulos",
+            "description": "Implementar funcionalidad para activar/desactivar módulos según acuerdos.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Se requiere que el sistema guarde qué pago canceló qué factura, para poder ver …\". Experiencia en desarrollo de funcionalidades configurables.",
+            "estimated_hours": 30.0,
+            "confidence": "alta",
+            "reference_project_id": 106,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T3",
+            "title": "Configuración de acceso para brokers",
+            "description": "Desarrollar sistema de acceso y permisos para brokers en la plataforma.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Se requiere que las operaciones se numeren de forma correlativa dentro de cada …\". Experiencia en configuración de accesos y permisos.",
+            "estimated_hours": 25.0,
+            "confidence": "alta",
+            "reference_project_id": 106,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T4",
+            "title": "Implementación de interfaz modular",
+            "description": "Diseñar y desarrollar interfaz que soporte módulos activables.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"En la view principal agregar la opción de filtrar por tags\". Experiencia en diseño de interfaces modulares.",
+            "estimated_hours": 35.0,
+            "confidence": "alta",
+            "reference_project_id": 106,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T5",
+            "title": "Pruebas de integración y funcionalidad",
+            "description": "Realizar pruebas para asegurar la correcta integración y funcionalidad de módulos.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Se desea corregir un error sin borrar nada: que el sistema genere la operación …\". Experiencia en pruebas de integración complejas.",
+            "estimated_hours": 20.0,
+            "confidence": "alta",
+            "reference_project_id": 106,
+            "depends_on": [
+              "T2",
+              "T3",
+              "T4"
+            ]
+          },
+          {
+            "id": "T6",
+            "title": "Documentación de la plataforma modular",
+            "description": "Crear documentación detallada de la plataforma y sus módulos.",
+            "suggested_assignee_id": null,
+            "assignee_reasoning": "No hay evidencia de experiencia previa en documentación de plataformas modulares.",
+            "estimated_hours": 15.0,
+            "confidence": "baja",
+            "reference_project_id": 106,
+            "depends_on": [
+              "T5"
+            ]
+          }
+        ],
+        "assumptions": [
+          "Se asume que las tres aplicaciones actuales son compatibles para ser integradas en una plataforma única."
+        ],
+        "risks": [
+          "Riesgo de incompatibilidad entre las aplicaciones actuales al integrarlas en una plataforma única.",
+          "Posible resistencia al cambio por parte de los brokers al modificar la forma en que acceden a las aplicaciones."
+        ]
+      },
+      "warnings": [
+        "T5: 'Pruebas de integración y funcionalidad' parece una fase del ciclo de vida, no una pieza funcional"
+      ],
+      "pairs": [
+        {
+          "real": "Submodulo de trading - Terminal",
+          "ai": "Documentación de la plataforma modular",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": null
+        },
+        {
+          "real": "Empaquetado",
+          "ai": "Pruebas de integración y funcionalidad",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Modulo Terminal",
+          "ai": "Implementación de interfaz modular",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Modulo Copytrading",
+          "ai": "Configuración de acceso para brokers",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Modulo WL",
+          "ai": "Desarrollo de sistema de activación de módulos",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Gateway MT5",
+          "ai": "Integración de aplicaciones en plataforma única",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 1
+        }
+      ],
+      "member_names": {
+        "18": "Cesar Velasquez",
+        "5": "Juan Florez",
+        "1": "Marcela Mazo",
+        "2": "Santiago Gutierrez",
+        "3": "Santiago Trujillo",
+        "17": "Adrianyela Paola Villalobos",
+        "16": "David Enciso",
+        "4": "Edgar Martinez",
+        "11": "Fabiola Nava",
+        "15": "Jesus Andres Bocanegra Mejia",
+        "9": "Luis Quintero",
+        "8": "Maria Paz Hernandez Barrera",
+        "10": "Sebastian Sosa Serrano"
+      }
+    },
+    {
+      "project_id": 378,
+      "mode": "none",
+      "real": [
+        {
+          "title": "Contratos",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Nucleo",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Gateway MT5",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Modulo WL",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Modulo Copytrading",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Modulo Terminal",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Empaquetado",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Submodulo de trading - Terminal",
+          "assignees": [
+            18
+          ]
+        }
+      ],
+      "proposal": {
+        "project": {
+          "title": "Plataforma Modular para Brokers",
+          "description": "Integrar tres aplicaciones en una plataforma modular para brokers, permitiendo activar o desactivar módulos según acuerdos sin bifurcar el código."
+        },
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "Análisis de aplicaciones actuales",
+            "description": "Revisar las tres aplicaciones existentes para identificar funcionalidades y dependencias.",
+            "suggested_assignee_id": 5,
+            "assignee_reasoning": "\"Chief Technology Officer - CTO\" tiene la visión global necesaria para entender las aplicaciones actuales y planificar su integración.",
+            "estimated_hours": 10.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "Diseño de arquitectura modular",
+            "description": "Crear una arquitectura que permita activar/desactivar módulos sin bifurcar el código.",
+            "suggested_assignee_id": 18,
+            "assignee_reasoning": "\"Full Stack Engineer\" ha trabajado en proyectos de arquitectura modular similares.",
+            "estimated_hours": 15.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T3",
+            "title": "Implementación de sistema de activación de módulos",
+            "description": "Desarrollar el sistema que permite activar o desactivar módulos según acuerdos con brokers.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Full Stack Engineer\" tiene experiencia en desarrollo de sistemas configurables.",
+            "estimated_hours": 20.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T2"
+            ]
+          },
+          {
+            "id": "T4",
+            "title": "Integración de aplicaciones en la nueva plataforma",
+            "description": "Integrar las tres aplicaciones en la nueva plataforma modular.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Full Stack Engineer\" ha trabajado en integración de sistemas complejos anteriormente.",
+            "estimated_hours": 25.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T3"
+            ]
+          },
+          {
+            "id": "T5",
+            "title": "Pruebas internas de la plataforma",
+            "description": "Realizar pruebas internas para asegurar el correcto funcionamiento de la plataforma modular.",
+            "suggested_assignee_id": 2,
+            "assignee_reasoning": "\"Infrastructure & Support Engineer\" es idóneo para pruebas de infraestructura y soporte.",
+            "estimated_hours": 10.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T4"
+            ]
+          },
+          {
+            "id": "T6",
+            "title": "Pruebas externas con brokers",
+            "description": "Coordinar y ejecutar pruebas con brokers para validar la funcionalidad de la plataforma.",
+            "suggested_assignee_id": 16,
+            "assignee_reasoning": "\"Portfolio Manager - Financial Q Group\" tiene contacto directo con brokers y puede coordinar pruebas externas.",
+            "estimated_hours": 15.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T5"
+            ]
+          },
+          {
+            "id": "T7",
+            "title": "Documentación de la plataforma",
+            "description": "Crear documentación detallada de la plataforma modular para usuarios y administradores.",
+            "suggested_assignee_id": 17,
+            "assignee_reasoning": "\"Administrative Assistant\" ha colaborado en documentación de proyectos anteriores.",
+            "estimated_hours": 12.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T6"
+            ]
+          }
+        ],
+        "assumptions": [
+          "Se asume que las tres aplicaciones actuales son compatibles para ser integradas en una plataforma modular.",
+          "Se asume que los brokers estarán disponibles para realizar pruebas externas."
+        ],
+        "risks": [
+          "Riesgo de incompatibilidad entre las aplicaciones actuales al integrarlas en una plataforma modular.",
+          "Posible resistencia de los brokers a cambiar a la nueva plataforma modular."
+        ]
+      },
+      "warnings": [
+        "T5: 'Pruebas internas de la plataforma' parece una fase del ciclo de vida, no una pieza funcional",
+        "T6: 'Pruebas externas con brokers' parece una fase del ciclo de vida, no una pieza funcional"
+      ],
+      "pairs": [
+        {
+          "real": "Submodulo de trading - Terminal",
+          "ai": "Documentación de la plataforma",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 17
+        },
+        {
+          "real": "Empaquetado",
+          "ai": "Pruebas externas con brokers",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 16
+        },
+        {
+          "real": "Modulo Terminal",
+          "ai": "Pruebas internas de la plataforma",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 2
+        },
+        {
+          "real": "Modulo Copytrading",
+          "ai": "Integración de aplicaciones en la nueva plataforma",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Modulo WL",
+          "ai": "Implementación de sistema de activación de módulos",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Gateway MT5",
+          "ai": "Diseño de arquitectura modular",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 18
+        },
+        {
+          "real": "Nucleo",
+          "ai": "Análisis de aplicaciones actuales",
+          "jaccard": 0.0,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 5
+        }
+      ],
+      "member_names": {
+        "18": "Cesar Velasquez",
+        "5": "Juan Florez",
+        "1": "Marcela Mazo",
+        "2": "Santiago Gutierrez",
+        "3": "Santiago Trujillo",
+        "17": "Adrianyela Paola Villalobos",
+        "16": "David Enciso",
+        "4": "Edgar Martinez",
+        "11": "Fabiola Nava",
+        "15": "Jesus Andres Bocanegra Mejia",
+        "9": "Luis Quintero",
+        "8": "Maria Paz Hernandez Barrera",
+        "10": "Sebastian Sosa Serrano"
+      }
+    }
+  ]
+}

@@ -49,11 +49,13 @@ PASO 1, el proyecto. Resume la descripción en un título corto y una descripci�
 
 PASO 2, las subtareas. Cada subtarea es una PIEZA FUNCIONAL del producto que se puede entregar y verificar por sí sola (una pantalla, una regla de negocio, una integración, un reporte, una configuración), exactamente como hacen los PROYECTOS ANTERIORES del contexto: fíjate en cómo están redactadas sus subtareas e imita su estilo, número y tamaño. Las fases del ciclo de vida (levantar requisitos, diseñar, desarrollar, probar, documentar, desplegar, lanzar) NO son subtareas: ya son las ETAPAS DEL FLUJO por las que cada tarjeta avanza, así que está prohibido crear subtareas con esos nombres salvo que la descripción pida explícitamente un entregable de ese tipo (por ejemplo un manual de usuario). Si hay historial, cita en reference_project_id el proyecto anterior más parecido al proyecto completo. Si no hay historial comparable usa entre 4 y 8 subtareas.
 
-PASO 3, la persona idónea. Para cada subtarea elige UNA persona de MIEMBROS DISPONIBLES usando exactamente su id numérico. La asignación es por EVIDENCIA, no por reparto equitativo: es correcto que una misma persona reciba la mayoría o todas las subtareas si el historial lo respalda. Orden de prioridad: primero quien ya completó tareas del mismo producto o funcionalidad según "ha hecho" o según los PROYECTOS ANTERIORES; después quien tenga el cargo más afín; solo entre candidatos realmente equivalentes, el que tenga menos tareas abiertas. Prefiere miembros del mismo equipo del tablero. En assignee_reasoning escribe primero, entre comillas, el título textual de una tarea o proyecto del contexto que ESA persona hizo (o su cargo si no hay tarea citable) y después, en pocas palabras, por qué esa experiencia aplica a la subtarea; frases genéricas como "tiene experiencia en desarrollo" están prohibidas, y citar tareas de otra persona o de un producto sin relación cuenta como no tener evidencia. Si nadie es idóneo deja suggested_assignee_id en null y explica por qué.
+PASO 3, la persona idónea. Para cada subtarea elige UNA persona de MIEMBROS DISPONIBLES usando exactamente su id numérico. La asignación es por EVIDENCIA, no por reparto equitativo: es correcto que una misma persona reciba la mayoría o todas las subtareas si el historial lo respalda. Orden de prioridad: primero quien ya trabajó en el MISMO producto o dominio (fíjate en "proyectos en los que ha trabajado" y en los PROYECTOS ANTERIORES: trading, contabilidad, portal, Deck, web, marketing…); después quien hizo tareas de la misma funcionalidad según "tareas que ha hecho"; después quien tenga el cargo más afín; solo entre candidatos realmente equivalentes, el que tenga menos tareas abiertas. Tener muchas tareas completadas en otro producto NO es evidencia: la afinidad de producto pesa más que el volumen. Prefiere miembros del mismo equipo del tablero. En assignee_reasoning escribe primero, entre comillas, el título textual de una tarea o proyecto del contexto que ESA persona hizo (o su cargo si no hay tarea citable) y después, en pocas palabras, por qué esa experiencia aplica a la subtarea; frases genéricas como "tiene experiencia en desarrollo" están prohibidas, y citar tareas de otra persona o de un producto sin relación cuenta como no tener evidencia. Si nadie es idóneo deja suggested_assignee_id en null y explica por qué.
 
 PASO 4, estimación y confianza. Estima las horas de cada subtarea por su complejidad, comparando con tareas similares del historial. confidence es alta SOLO si citas en assignee_reasoning una tarea o proyecto anterior del mismo producto o funcionalidad; media si la analogía es por cargo o por un producto distinto; baja si no hay historial comparable. No todas las subtareas pueden ser alta salvo que cada una tenga su cita.
 
 Devuelve exclusivamente JSON válido sin markdown ni texto adicional con esta estructura: un objeto project con title y description. Un array tasks donde cada elemento tiene id con el formato T1, T2..., title, description, suggested_assignee_id como número o null, assignee_reasoning, estimated_hours como número, confidence con valor alta, media o baja, reference_project_id como número o null, y depends_on como array de ids de tareas. Un array assumptions con supuestos que tomaste por falta de información. Un array risks con riesgos relevantes.
+
+Escribe todo en español (títulos, descripciones, justificaciones), aunque la descripción venga en otro idioma.
 
 REGLA CRÍTICA: mínimo 2 y máximo 12 subtareas. title máximo 90 caracteres, description máximo 200 caracteres, assignee_reasoning máximo 200 caracteres. Solo usa ids de miembros que aparezcan en la lista. JSON compacto sin comentarios."""
 
@@ -110,6 +112,8 @@ def _evidence_index(context: Dict[str, Any]) -> List[Tuple[str, set]]:
             idx.append((_norm(t), {m["id"]}))
         if m.get("job_title"):
             idx.append((_norm(m["job_title"]), {m["id"]}))
+        for t in m.get("projects_worked", []) or []:
+            idx.append((_norm(t), {m["id"]}))
     for p in context.get("history_projects", []):
         owners = set()
         for st in p.get("subtasks", []):
@@ -213,11 +217,13 @@ def validate_and_normalize(data: Dict[str, Any], context: Dict[str, Any]) -> Tup
         reasoning = str(t.get("assignee_reasoning") or "").strip()[:400]
         if _PHASE_TITLE.search(ttitle):
             warnings.append(f"{tid}: '{ttitle}' parece una fase del ciclo de vida, no una pieza funcional")
-        if aid is not None and has_history:
+        if aid is not None:
             cited, owners = _find_evidence(reasoning, evidence)
             generic = bool(_GENERIC_REASON.search(reasoning))
-            if not cited:
-                warnings.append(f"{tid}: la justificación no cita ninguna tarea, proyecto o cargo del contexto")
+            quoted = bool(_re.search(r'["«“\']', reasoning))
+            if not cited and (has_history or quoted):
+                warnings.append(f"{tid}: la justificación cita algo que no existe en el contexto (evidencia no verificable)"
+                                if quoted else f"{tid}: la justificación no cita ninguna tarea, proyecto o cargo del contexto")
             elif owners and aid not in owners:
                 warnings.append(f"{tid}: la evidencia citada pertenece a otra persona, no al asignado {aid}")
                 cited = False
@@ -239,10 +245,16 @@ def validate_and_normalize(data: Dict[str, Any], context: Dict[str, Any]) -> Tup
         })
 
     # Cita repetida mecánicamente: la misma evidencia en 3+ subtareas distintas.
+    # Citar varias veces un PROYECTO es legítimo (es la unidad de analogía); lo
+    # sospechoso es repetir la misma tarea puntual como justificación de todo.
     from collections import Counter
+    project_keys = {_norm(p.get("title", ""))[:25] for p in context.get("history_projects", [])}
+    for m in context.get("members", []):
+        project_keys |= {_norm(t)[:25] for t in (m.get("projects_worked") or [])}
+    project_keys.discard("")
     cites = Counter(_norm(t["assignee_reasoning"])[:40] for t in tasks if t["assignee_reasoning"])
     for key, n in cites.items():
-        if n >= 3 and key:
+        if n >= 3 and key and not any(pk and pk in key for pk in project_keys):
             affected = [t for t in tasks if _norm(t["assignee_reasoning"])[:40] == key]
             warnings.append(f"la misma cita se repite en {n} subtareas ({', '.join(t['id'] for t in affected)}): copia mecánica, no analogía por tarea")
             for t in affected:

@@ -79,10 +79,19 @@ def _resolve_job_titles(db: Session, user_ids: List[int]) -> Dict[int, str]:
     return out
 
 
-def build_board_context(db: Session, board: DeckBoard, *, include_history: bool = True) -> Dict[str, Any]:
+def build_board_context(db: Session, board: DeckBoard, *, include_history: bool = True,
+                        exclude_project_id: Optional[int] = None) -> Dict[str, Any]:
     """Arma el contexto para un tablero. `include_history=False` produce el
     modo "sin contexto" (equivalente a E1/E3 del estudio empírico): solo la lista
-    de miembros con su cargo, sin historial ni proyectos previos."""
+    de miembros con su cargo, sin historial ni proyectos previos.
+
+    `exclude_project_id` (backtest, leave-one-out): esa tarjeta padre y sus
+    subtareas se omiten del historial y de las estadísticas de los miembros, para
+    que la IA no vea la respuesta que se le va a pedir reconstruir."""
+    excluded: set = set()
+    if exclude_project_id is not None:
+        excluded = {exclude_project_id} | {r[0] for r in db.query(DeckCard.id)
+                                            .filter(DeckCard.parent_card_id == exclude_project_id).all()}
     team: Optional[Team] = board.team
     columns = (db.query(DeckColumn).filter(DeckColumn.board_id == board.id)
                .order_by(DeckColumn.position).all())
@@ -111,13 +120,27 @@ def build_board_context(db: Session, board: DeckBoard, *, include_history: bool 
                 .order_by(DeckCard.id.desc()).all())
         per_user: Dict[int, List[DeckCard]] = defaultdict(list)
         for uid, card in rows:
+            if card.id in excluded:
+                continue
             per_user[uid].append(card)
         minutes = dict(db.query(DeckTimeLog.user_id, func.coalesce(func.sum(DeckTimeLog.minutes), 0))
                        .filter(DeckTimeLog.user_id.in_(uids)).group_by(DeckTimeLog.user_id).all())
         team_logs_hours = any((m or 0) > 0 for m in minutes.values())
+        parent_title = {}
+        parent_ids_needed = {c.parent_card_id for cs in per_user.values() for c in cs if c.parent_card_id}
+        if parent_ids_needed:
+            parent_title = dict(db.query(DeckCard.id, DeckCard.title).filter(DeckCard.id.in_(parent_ids_needed)).all())
         for uid in uids:
             cards = per_user.get(uid, [])
             done = [c for c in cards if _is_done(c)]
+            # Productos/proyectos en los que ha participado (padres de sus tarjetas), más recientes primero.
+            seen, projects = set(), []
+            for c in sorted(cards, key=lambda c: -c.id):
+                pid = c.parent_card_id
+                if pid and pid not in excluded and pid in parent_title and pid not in seen:
+                    seen.add(pid); projects.append(_clip(parent_title[pid], 70))
+                if len(projects) >= 6:
+                    break
             open_ = [c for c in cards if not _is_done(c) and c.status != "cancelled"]
             # Títulos recientes: primero los de este tablero, luego el resto.
             done.sort(key=lambda c: (c.board_id != board.id, -c.id))
@@ -127,6 +150,7 @@ def build_board_context(db: Session, board: DeckBoard, *, include_history: bool 
                 "open_count": len(open_),
                 "hours_logged": round((minutes.get(uid, 0) or 0) / 60, 1),
                 "recent_completed_titles": [_clip(c.title, 80) for c in done[:MAX_RECENT_TITLES]],
+                "projects_worked": projects,
             }
 
     members: List[Dict[str, Any]] = []
@@ -155,6 +179,8 @@ def build_board_context(db: Session, board: DeckBoard, *, include_history: bool 
         name_of = {u.id: u.display_name for u in all_users}
         candidates = []
         for p in parents:
+            if p.id in excluded:
+                continue
             subs = (db.query(DeckCard).filter(DeckCard.parent_card_id == p.id)
                     .order_by(DeckCard.created_at).all())
             if not subs:
@@ -222,8 +248,10 @@ def summarize_context_for_prompt(ctx: Dict[str, Any]) -> str:
                      f" | abiertas: {m.get('open_count', 0)}")
             if ctx.get("team_logs_hours") and m.get("hours_logged"):
                 base += f" | horas registradas: {m['hours_logged']}"
+            if m.get("projects_worked"):
+                base += " | proyectos en los que ha trabajado: " + "; ".join(m["projects_worked"])
             if m.get("recent_completed_titles"):
-                base += " | ha hecho: " + "; ".join(m["recent_completed_titles"])
+                base += " | tareas que ha hecho: " + "; ".join(m["recent_completed_titles"])
         lines.append(base)
     if full:
         lines.append("")

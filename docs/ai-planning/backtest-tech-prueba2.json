@@ -1,0 +1,1508 @@
+{
+  "board_id": 1,
+  "model": "gpt-4o",
+  "summary": {
+    "full": {
+      "projects": 3,
+      "avg_size_ratio": 0.83,
+      "avg_title_coverage": 0.08,
+      "avg_title_similarity": 0.27,
+      "avg_lexical_coverage": 0.0,
+      "avg_assignee_pool_precision": 0.56,
+      "avg_assignee_pair_accuracy": 0.0,
+      "dominant_match_rate": 0.67,
+      "total_phase_warnings": 3,
+      "total_evidence_warnings": 3,
+      "avg_unassigned_ai": 0.0,
+      "total_tokens": 15494
+    },
+    "none": {
+      "projects": 3,
+      "avg_size_ratio": 0.88,
+      "avg_title_coverage": 0.08,
+      "avg_title_similarity": 0.29,
+      "avg_lexical_coverage": 0.0,
+      "avg_assignee_pool_precision": 0.33,
+      "avg_assignee_pair_accuracy": 0.0,
+      "dominant_match_rate": 0.33,
+      "total_phase_warnings": 2,
+      "total_evidence_warnings": 18,
+      "avg_unassigned_ai": 0.0,
+      "total_tokens": 6576
+    }
+  },
+  "rows": [
+    {
+      "project_id": 378,
+      "project": "Plataforma modular para brokers",
+      "mode": "full",
+      "model": "gpt-4o-2024-08-06",
+      "prompt_tokens": 4646,
+      "completion_tokens": 499,
+      "n_real": 8,
+      "n_ai": 5,
+      "size_ratio": 0.62,
+      "title_method": "embeddings",
+      "title_coverage": 0.0,
+      "title_similarity": 0.22,
+      "lexical_coverage": 0.0,
+      "assignee_pool_precision": 0.0,
+      "assignee_pair_accuracy": null,
+      "dominant_match": 0,
+      "phase_warnings": 1,
+      "evidence_warnings": 0,
+      "unassigned_ai": 0
+    },
+    {
+      "project_id": 378,
+      "project": "Plataforma modular para brokers",
+      "mode": "none",
+      "model": "gpt-4o-2024-08-06",
+      "prompt_tokens": 1529,
+      "completion_tokens": 741,
+      "n_real": 8,
+      "n_ai": 6,
+      "size_ratio": 0.75,
+      "title_method": "embeddings",
+      "title_coverage": 0.0,
+      "title_similarity": 0.24,
+      "lexical_coverage": 0.0,
+      "assignee_pool_precision": 0.33,
+      "assignee_pair_accuracy": null,
+      "dominant_match": 1,
+      "phase_warnings": 1,
+      "evidence_warnings": 4,
+      "unassigned_ai": 0
+    },
+    {
+      "project_id": 209,
+      "project": "Herramienta para Flujo Comercial (SIC)",
+      "mode": "full",
+      "model": "gpt-4o-2024-08-06",
+      "prompt_tokens": 4771,
+      "completion_tokens": 585,
+      "n_real": 4,
+      "n_ai": 6,
+      "size_ratio": 1.5,
+      "title_method": "embeddings",
+      "title_coverage": 0.25,
+      "title_similarity": 0.44,
+      "lexical_coverage": 0.0,
+      "assignee_pool_precision": 0.67,
+      "assignee_pair_accuracy": 0.0,
+      "dominant_match": 1,
+      "phase_warnings": 1,
+      "evidence_warnings": 2,
+      "unassigned_ai": 0
+    },
+    {
+      "project_id": 209,
+      "project": "Herramienta para Flujo Comercial (SIC)",
+      "mode": "none",
+      "model": "gpt-4o-2024-08-06",
+      "prompt_tokens": 1541,
+      "completion_tokens": 531,
+      "n_real": 4,
+      "n_ai": 6,
+      "size_ratio": 1.5,
+      "title_method": "embeddings",
+      "title_coverage": 0.25,
+      "title_similarity": 0.48,
+      "lexical_coverage": 0.0,
+      "assignee_pool_precision": 0.5,
+      "assignee_pair_accuracy": 0.0,
+      "dominant_match": 0,
+      "phase_warnings": 1,
+      "evidence_warnings": 7,
+      "unassigned_ai": 0
+    },
+    {
+      "project_id": 198,
+      "project": "Modificaciones y mejoras al Deck",
+      "mode": "full",
+      "model": "gpt-4o-2024-08-06",
+      "prompt_tokens": 4464,
+      "completion_tokens": 529,
+      "n_real": 16,
+      "n_ai": 6,
+      "size_ratio": 0.38,
+      "title_method": "embeddings",
+      "title_coverage": 0.0,
+      "title_similarity": 0.16,
+      "lexical_coverage": 0.0,
+      "assignee_pool_precision": 1.0,
+      "assignee_pair_accuracy": null,
+      "dominant_match": 1,
+      "phase_warnings": 1,
+      "evidence_warnings": 1,
+      "unassigned_ai": 0
+    },
+    {
+      "project_id": 198,
+      "project": "Modificaciones y mejoras al Deck",
+      "mode": "none",
+      "model": "gpt-4o-2024-08-06",
+      "prompt_tokens": 1520,
+      "completion_tokens": 714,
+      "n_real": 16,
+      "n_ai": 6,
+      "size_ratio": 0.38,
+      "title_method": "embeddings",
+      "title_coverage": 0.0,
+      "title_similarity": 0.16,
+      "lexical_coverage": 0.0,
+      "assignee_pool_precision": 0.17,
+      "assignee_pair_accuracy": null,
+      "dominant_match": 0,
+      "phase_warnings": 0,
+      "evidence_warnings": 7,
+      "unassigned_ai": 0
+    }
+  ],
+  "detail": [
+    {
+      "project_id": 378,
+      "mode": "full",
+      "real": [
+        {
+          "title": "Contratos",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Nucleo",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Gateway MT5",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Modulo WL",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Modulo Copytrading",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Modulo Terminal",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Empaquetado",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Submodulo de trading - Terminal",
+          "assignees": [
+            18
+          ]
+        }
+      ],
+      "proposal": {
+        "project": {
+          "title": "Plataforma Modular para Brokers",
+          "description": "Integrar tres aplicaciones en una plataforma modular para brokers, permitiendo activar o desactivar módulos según acuerdos, sin bifurcar código."
+        },
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "Integración de Aplicaciones Existentes",
+            "description": "Unificar las tres aplicaciones actuales en una sola plataforma modular.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Modificaciones y mejoras al Deck\"; experiencia en integración de funcionalidades múltiples.",
+            "estimated_hours": 40.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "Sistema de Activación de Módulos",
+            "description": "Desarrollar un sistema para activar o desactivar módulos según acuerdos con brokers.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Modificaciones y mejoras al Deck\"; experiencia en desarrollo de funcionalidades configurables.",
+            "estimated_hours": 30.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T3",
+            "title": "Interfaz de Usuario Modular",
+            "description": "Diseñar una interfaz que permita la gestión de módulos de manera intuitiva.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Modificaciones y mejoras al Portal Home (Habbo)\"; experiencia en diseño de interfaces complejas.",
+            "estimated_hours": 25.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T4",
+            "title": "Pruebas de Integración y Modularidad",
+            "description": "Realizar pruebas para asegurar la correcta integración y funcionalidad modular.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Endurecimiento\"; experiencia en pruebas de integridad y seguridad de sistemas.",
+            "estimated_hours": 20.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T2",
+              "T3"
+            ]
+          },
+          {
+            "id": "T5",
+            "title": "Documentación de la Plataforma Modular",
+            "description": "Crear documentación detallada sobre la plataforma y su uso modular.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Informes y panel\"; experiencia en documentación de sistemas complejos.",
+            "estimated_hours": 15.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T4"
+            ]
+          }
+        ],
+        "assumptions": [
+          "Las tres aplicaciones actuales son compatibles para ser integradas sin necesidad de reescribir código base."
+        ],
+        "risks": [
+          "Posible incompatibilidad entre las aplicaciones actuales al integrarlas en una sola plataforma.",
+          "Dificultades en la gestión de módulos si no se define claramente el sistema de activación/desactivación."
+        ]
+      },
+      "warnings": [
+        "T4: 'Pruebas de Integración y Modularidad' parece una fase del ciclo de vida, no una pieza funcional"
+      ],
+      "pairs": [
+        {
+          "real": "Modulo Terminal",
+          "ai": "Interfaz de Usuario Modular",
+          "jaccard": 0.46,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Modulo WL",
+          "ai": "Sistema de Activación de Módulos",
+          "jaccard": 0.37,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Contratos",
+          "ai": "Integración de Aplicaciones Existentes",
+          "jaccard": 0.33,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Submodulo de trading - Terminal",
+          "ai": "Pruebas de Integración y Modularidad",
+          "jaccard": 0.33,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Modulo Copytrading",
+          "ai": "Documentación de la Plataforma Modular",
+          "jaccard": 0.29,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 1
+        }
+      ],
+      "member_names": {
+        "18": "Cesar Velasquez",
+        "5": "Juan Florez",
+        "1": "Marcela Mazo",
+        "2": "Santiago Gutierrez",
+        "3": "Santiago Trujillo",
+        "17": "Adrianyela Paola Villalobos",
+        "16": "David Enciso",
+        "4": "Edgar Martinez",
+        "11": "Fabiola Nava",
+        "15": "Jesus Andres Bocanegra Mejia",
+        "9": "Luis Quintero",
+        "8": "Maria Paz Hernandez Barrera",
+        "10": "Sebastian Sosa Serrano"
+      }
+    },
+    {
+      "project_id": 378,
+      "mode": "none",
+      "real": [
+        {
+          "title": "Contratos",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Nucleo",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Gateway MT5",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Modulo WL",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Modulo Copytrading",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Modulo Terminal",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Empaquetado",
+          "assignees": [
+            18
+          ]
+        },
+        {
+          "title": "Submodulo de trading - Terminal",
+          "assignees": [
+            18
+          ]
+        }
+      ],
+      "proposal": {
+        "project": {
+          "title": "Plataforma Modular para Brokers",
+          "description": "Integrar tres aplicaciones en una plataforma modular para brokers, permitiendo activar o desactivar módulos según acuerdos sin bifurcar código."
+        },
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "Diseño de arquitectura modular",
+            "description": "Definir la arquitectura para integrar las aplicaciones en módulos activables.",
+            "suggested_assignee_id": 5,
+            "assignee_reasoning": "\"Chief Technology Officer - CTO\" tiene experiencia en definir arquitecturas complejas.",
+            "estimated_hours": 20.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "Integración de aplicación A",
+            "description": "Convertir la aplicación A en un módulo activable dentro de la plataforma.",
+            "suggested_assignee_id": 18,
+            "assignee_reasoning": "\"Full Stack Engineer\" ha trabajado en integración de aplicaciones.",
+            "estimated_hours": 30.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T3",
+            "title": "Integración de aplicación B",
+            "description": "Convertir la aplicación B en un módulo activable dentro de la plataforma.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Full Stack Engineer\" tiene experiencia en desarrollo de módulos.",
+            "estimated_hours": 30.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T4",
+            "title": "Integración de aplicación C",
+            "description": "Convertir la aplicación C en un módulo activable dentro de la plataforma.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Full Stack Engineer\" ha trabajado en proyectos de integración.",
+            "estimated_hours": 30.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T5",
+            "title": "Implementación de sistema de activación de módulos",
+            "description": "Desarrollar el sistema que permite activar o desactivar módulos según acuerdos.",
+            "suggested_assignee_id": 18,
+            "assignee_reasoning": "\"Full Stack Engineer\" tiene experiencia en desarrollo de sistemas configurables.",
+            "estimated_hours": 25.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T6",
+            "title": "Pruebas de integración y funcionalidad",
+            "description": "Realizar pruebas para asegurar la correcta integración y funcionalidad de los módulos.",
+            "suggested_assignee_id": 2,
+            "assignee_reasoning": "\"Infrastructure & Support Engineer\" tiene experiencia en testing de sistemas integrados.",
+            "estimated_hours": 20.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T2",
+              "T3",
+              "T4",
+              "T5"
+            ]
+          }
+        ],
+        "assumptions": [
+          "Las aplicaciones actuales son compatibles para ser convertidas en módulos.",
+          "No se requiere desarrollo de nuevas funcionalidades, solo integración."
+        ],
+        "risks": [
+          "Posible incompatibilidad entre aplicaciones al integrarlas en una plataforma común.",
+          "Retrasos en la definición de la arquitectura modular pueden afectar el cronograma."
+        ]
+      },
+      "warnings": [
+        "T2: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T3: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T3: justificación genérica ('\"Full Stack Engineer\" tiene experiencia en desarrollo de mód…')",
+        "T4: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T5: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T5: justificación genérica ('\"Full Stack Engineer\" tiene experiencia en desarrollo de sis…')",
+        "T6: 'Pruebas de integración y funcionalidad' parece una fase del ciclo de vida, no una pieza funcional"
+      ],
+      "pairs": [
+        {
+          "real": "Modulo Terminal",
+          "ai": "Implementación de sistema de activación de módulos",
+          "jaccard": 0.4,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 18
+        },
+        {
+          "real": "Contratos",
+          "ai": "Pruebas de integración y funcionalidad",
+          "jaccard": 0.33,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 2
+        },
+        {
+          "real": "Submodulo de trading - Terminal",
+          "ai": "Integración de aplicación C",
+          "jaccard": 0.32,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Modulo WL",
+          "ai": "Diseño de arquitectura modular",
+          "jaccard": 0.32,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 5
+        },
+        {
+          "real": "Empaquetado",
+          "ai": "Integración de aplicación A",
+          "jaccard": 0.28,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 18
+        },
+        {
+          "real": "Nucleo",
+          "ai": "Integración de aplicación B",
+          "jaccard": 0.24,
+          "real_assignees": [
+            18
+          ],
+          "ai_assignee": 1
+        }
+      ],
+      "member_names": {
+        "18": "Cesar Velasquez",
+        "5": "Juan Florez",
+        "1": "Marcela Mazo",
+        "2": "Santiago Gutierrez",
+        "3": "Santiago Trujillo",
+        "17": "Adrianyela Paola Villalobos",
+        "16": "David Enciso",
+        "4": "Edgar Martinez",
+        "11": "Fabiola Nava",
+        "15": "Jesus Andres Bocanegra Mejia",
+        "9": "Luis Quintero",
+        "8": "Maria Paz Hernandez Barrera",
+        "10": "Sebastian Sosa Serrano"
+      }
+    },
+    {
+      "project_id": 209,
+      "mode": "full",
+      "real": [
+        {
+          "title": "Investigación y desarrollo de funcionalidad generadora de Leads (Scrapper)",
+          "assignees": [
+            16
+          ]
+        },
+        {
+          "title": "Funcionalidad bitacora comercial que permita nutrir base de datos y logs de cualquier interacción con leads y clientes",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Herramienta para Generación de Contenido",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Funcionalidad dashboard de analisis de SEO/GEO",
+          "assignees": [
+            1
+          ]
+        }
+      ],
+      "proposal": {
+        "project": {
+          "title": "Herramienta para Flujo Comercial (SIC)",
+          "description": "Desarrollo de herramientas tecnológicas para optimizar el flujo de trabajo comercial y de marketing."
+        },
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "Análisis del flujo comercial actual",
+            "description": "Revisar y documentar el flujo de trabajo comercial actual para identificar áreas de mejora.",
+            "suggested_assignee_id": 4,
+            "assignee_reasoning": "\"Construcción del Ecosistema Estratégico de QQ Capital Investment Fund\"; experiencia en procesos operativos.",
+            "estimated_hours": 10.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "Diseño de la interfaz de usuario",
+            "description": "Crear un diseño de interfaz de usuario intuitivo para la herramienta de flujo comercial.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Modificaciones y Mejoras al Portal Home (Habbo)\"; experiencia en diseño de interfaces.",
+            "estimated_hours": 15.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T3",
+            "title": "Integración con CRM existente",
+            "description": "Integrar la herramienta con el CRM actual para sincronizar datos comerciales.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"CRM tipo GHL\"; experiencia en integración de sistemas CRM.",
+            "estimated_hours": 20.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T4",
+            "title": "Desarrollo de módulo de reportes",
+            "description": "Crear un módulo para generar reportes de rendimiento comercial y de marketing.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Informes y panel\"; experiencia en desarrollo de módulos de reportes.",
+            "estimated_hours": 25.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T5",
+            "title": "Implementación de notificaciones automáticas",
+            "description": "Desarrollar un sistema de notificaciones automáticas para alertas comerciales.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Nuevo Home para el Portal (Habbo)\"; experiencia en implementación de notificaciones.",
+            "estimated_hours": 15.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T2"
+            ]
+          },
+          {
+            "id": "T6",
+            "title": "Pruebas de usuario y ajustes",
+            "description": "Realizar pruebas de usuario para identificar y corregir problemas en la herramienta.",
+            "suggested_assignee_id": 18,
+            "assignee_reasoning": "\"Dashboard QQGG - Clientes\"; experiencia en pruebas y ajustes de herramientas web.",
+            "estimated_hours": 10.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T2",
+              "T3",
+              "T4",
+              "T5"
+            ]
+          }
+        ],
+        "assumptions": [
+          "Se asume que el CRM actual es compatible con nuevas integraciones.",
+          "Se asume que el flujo comercial actual está documentado."
+        ],
+        "risks": [
+          "Integración con CRM podría requerir más tiempo si no es compatible.",
+          "Cambios en el flujo comercial podrían afectar el diseño de la herramienta."
+        ]
+      },
+      "warnings": [
+        "T3: la evidencia citada pertenece a otra persona, no al asignado 1",
+        "T3: confidence rebajada a media por falta de evidencia verificable",
+        "T6: 'Pruebas de usuario y ajustes' parece una fase del ciclo de vida, no una pieza funcional"
+      ],
+      "pairs": [
+        {
+          "real": "Funcionalidad bitacora comercial que permita nutrir base de datos y logs de cualquier interacción con leads y clientes",
+          "ai": "Integración con CRM existente",
+          "jaccard": 0.57,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Investigación y desarrollo de funcionalidad generadora de Leads (Scrapper)",
+          "ai": "Desarrollo de módulo de reportes",
+          "jaccard": 0.5,
+          "real_assignees": [
+            16
+          ],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Funcionalidad dashboard de analisis de SEO/GEO",
+          "ai": "Análisis del flujo comercial actual",
+          "jaccard": 0.36,
+          "real_assignees": [
+            1
+          ],
+          "ai_assignee": 4
+        },
+        {
+          "real": "Herramienta para Generación de Contenido",
+          "ai": "Diseño de la interfaz de usuario",
+          "jaccard": 0.35,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 3
+        }
+      ],
+      "member_names": {
+        "18": "Cesar Velasquez",
+        "5": "Juan Florez",
+        "1": "Marcela Mazo",
+        "2": "Santiago Gutierrez",
+        "3": "Santiago Trujillo",
+        "17": "Adrianyela Paola Villalobos",
+        "16": "David Enciso",
+        "4": "Edgar Martinez",
+        "11": "Fabiola Nava",
+        "15": "Jesus Andres Bocanegra Mejia",
+        "9": "Luis Quintero",
+        "8": "Maria Paz Hernandez Barrera",
+        "10": "Sebastian Sosa Serrano"
+      }
+    },
+    {
+      "project_id": 209,
+      "mode": "none",
+      "real": [
+        {
+          "title": "Investigación y desarrollo de funcionalidad generadora de Leads (Scrapper)",
+          "assignees": [
+            16
+          ]
+        },
+        {
+          "title": "Funcionalidad bitacora comercial que permita nutrir base de datos y logs de cualquier interacción con leads y clientes",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Herramienta para Generación de Contenido",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Funcionalidad dashboard de analisis de SEO/GEO",
+          "assignees": [
+            1
+          ]
+        }
+      ],
+      "proposal": {
+        "project": {
+          "title": "Herramienta para Flujo Comercial",
+          "description": "Desarrollo de herramientas tecnológicas para mejorar el flujo de trabajo comercial y de marketing."
+        },
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "Análisis de requisitos comerciales",
+            "description": "Revisar y documentar los requisitos del flujo comercial actual.",
+            "suggested_assignee_id": 16,
+            "assignee_reasoning": "\"Construcción del Ecosistema Estratégico de QQ Capital Investment Fund\"; experiencia en procesos comerciales.",
+            "estimated_hours": 10.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "Diseño de interfaz de usuario",
+            "description": "Crear el diseño de la interfaz de usuario para la herramienta comercial.",
+            "suggested_assignee_id": 15,
+            "assignee_reasoning": "\"Creative Graphic Designer\"; experiencia en diseño gráfico y marketing.",
+            "estimated_hours": 12.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T3",
+            "title": "Desarrollo de módulo de gestión de clientes",
+            "description": "Implementar un módulo para gestionar información de clientes.",
+            "suggested_assignee_id": 18,
+            "assignee_reasoning": "\"Ingeniero Desarrollador Full Stack\"; experiencia en desarrollo de módulos web.",
+            "estimated_hours": 20.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T4",
+            "title": "Integración con sistema de marketing",
+            "description": "Conectar la herramienta con el sistema de marketing existente.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Ingeniero Desarrollador Full Stack\"; experiencia en integraciones de sistemas.",
+            "estimated_hours": 15.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T3"
+            ]
+          },
+          {
+            "id": "T5",
+            "title": "Pruebas de funcionalidad",
+            "description": "Realizar pruebas internas de la herramienta desarrollada.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Ingeniero Desarrollador Full Stack\"; experiencia en testing interno.",
+            "estimated_hours": 10.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T3",
+              "T4"
+            ]
+          },
+          {
+            "id": "T6",
+            "title": "Documentación del sistema",
+            "description": "Crear documentación técnica y de usuario para la herramienta.",
+            "suggested_assignee_id": 17,
+            "assignee_reasoning": "\"Asistente Administrativa\"; experiencia en documentación.",
+            "estimated_hours": 8.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T5"
+            ]
+          }
+        ],
+        "assumptions": [
+          "Se asume que la herramienta debe integrarse con sistemas de marketing existentes.",
+          "Se asume que el flujo comercial actual está bien documentado para el análisis."
+        ],
+        "risks": [
+          "Riesgo de incompatibilidad con sistemas de marketing existentes.",
+          "Posible falta de claridad en los requisitos comerciales iniciales."
+        ]
+      },
+      "warnings": [
+        "T1: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T1: confidence rebajada a media por falta de evidencia verificable",
+        "T3: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T4: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T5: 'Pruebas de funcionalidad' parece una fase del ciclo de vida, no una pieza funcional",
+        "T5: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T6: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "la misma cita se repite en 3 subtareas (T3, T4, T5): copia mecánica, no analogía por tarea"
+      ],
+      "pairs": [
+        {
+          "real": "Funcionalidad bitacora comercial que permita nutrir base de datos y logs de cualquier interacción con leads y clientes",
+          "ai": "Desarrollo de módulo de gestión de clientes",
+          "jaccard": 0.62,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 18
+        },
+        {
+          "real": "Funcionalidad dashboard de analisis de SEO/GEO",
+          "ai": "Pruebas de funcionalidad",
+          "jaccard": 0.51,
+          "real_assignees": [
+            1
+          ],
+          "ai_assignee": 1
+        },
+        {
+          "real": "Investigación y desarrollo de funcionalidad generadora de Leads (Scrapper)",
+          "ai": "Integración con sistema de marketing",
+          "jaccard": 0.45,
+          "real_assignees": [
+            16
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Herramienta para Generación de Contenido",
+          "ai": "Documentación del sistema",
+          "jaccard": 0.37,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 17
+        }
+      ],
+      "member_names": {
+        "18": "Cesar Velasquez",
+        "5": "Juan Florez",
+        "1": "Marcela Mazo",
+        "2": "Santiago Gutierrez",
+        "3": "Santiago Trujillo",
+        "17": "Adrianyela Paola Villalobos",
+        "16": "David Enciso",
+        "4": "Edgar Martinez",
+        "11": "Fabiola Nava",
+        "15": "Jesus Andres Bocanegra Mejia",
+        "9": "Luis Quintero",
+        "8": "Maria Paz Hernandez Barrera",
+        "10": "Sebastian Sosa Serrano"
+      }
+    },
+    {
+      "project_id": 198,
+      "mode": "full",
+      "real": [
+        {
+          "title": "Funcionalidad de \"Like\" o similar en los comentarios",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Inicialización de datos de subtareas a partir de la tarea principal",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Separar las tareas completamente finalizadas en el view de Trabajo",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Funcionalidad Multiples Subtasks",
+          "assignees": [
+            3,
+            10
+          ]
+        },
+        {
+          "title": "Agregar un check de \"visto\" en cada notificación no leída",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "En view de trabajo mostrar las tareas que \"estoy siguiendo\" en una sección colapsable",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Translations: Manejo idioma Inglés y Español",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Agregar sección de Links and Files",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Los adjuntos tipo pdf e imagenes deben poder previsualizarse (o abrir en new tab) sin necesidad de descargar",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Gestión de estados de una tarea",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Agregar \"loading\" component",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "En los comentarios de las tareas detectar cuando existe una url en el texto y transformaro para que se comporte como un link",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "En la columna de Creación, permitir colapsar/expandir las subtasks dentro de su task principal",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Si una task no tiene End Date pero tiene subtasks, establecer automaticamente el End Date más lejano entre los definidos en sus subtasks",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "En Timeline incluir un check filtro para no mostrar tareas ya completadas",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "En la view principal agregar la opción de filtrar por tags",
+          "assignees": [
+            3
+          ]
+        }
+      ],
+      "proposal": {
+        "project": {
+          "title": "Modificaciones y mejoras al Deck",
+          "description": "Implementar mejoras en Deck basadas en comentarios de usuarios."
+        },
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "Recopilación de comentarios de usuarios",
+            "description": "Recolectar y analizar comentarios de usuarios sobre el uso de Deck.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Project/Activity tracker (new Deck)\" trabajó en el desarrollo inicial de Deck.",
+            "estimated_hours": 8.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "Implementación de mejoras en la interfaz",
+            "description": "Actualizar la interfaz de Deck según el feedback recibido.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Modificaciones y Mejoras al Portal Home (Habbo)\" experiencia en mejoras de interfaz.",
+            "estimated_hours": 12.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T3",
+            "title": "Optimización del rendimiento",
+            "description": "Mejorar el rendimiento de Deck para una experiencia más fluida.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Modificaciones y Mejoras al Portal Home (Habbo)\" trabajó en optimización de rendimiento.",
+            "estimated_hours": 10.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T4",
+            "title": "Integración de nuevas funcionalidades",
+            "description": "Agregar nuevas funcionalidades solicitadas por los usuarios.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Project/Activity tracker (new Deck)\" trabajó en funcionalidades de Deck.",
+            "estimated_hours": 15.0,
+            "confidence": "alta",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T5",
+            "title": "Pruebas de usuario",
+            "description": "Realizar pruebas con usuarios para validar las mejoras implementadas.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Modificaciones y Mejoras al Portal Home (Habbo)\" experiencia en pruebas de usuario.",
+            "estimated_hours": 8.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T2",
+              "T3",
+              "T4"
+            ]
+          },
+          {
+            "id": "T6",
+            "title": "Documentación de cambios",
+            "description": "Actualizar la documentación de Deck con las nuevas mejoras.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Modificaciones y Mejoras al Portal Home (Habbo)\" experiencia en documentación de cambios.",
+            "estimated_hours": 6.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T5"
+            ]
+          }
+        ],
+        "assumptions": [
+          "Se asume que los comentarios de los usuarios ya están disponibles para análisis."
+        ],
+        "risks": [
+          "Los comentarios de los usuarios podrían no ser suficientes para identificar todas las mejoras necesarias."
+        ]
+      },
+      "warnings": [
+        "T5: 'Pruebas de usuario' parece una fase del ciclo de vida, no una pieza funcional",
+        "la misma cita se repite en 4 subtareas (T2, T3, T5, T6): copia mecánica, no analogía por tarea"
+      ],
+      "pairs": [
+        {
+          "real": "Funcionalidad de \"Like\" o similar en los comentarios",
+          "ai": "Recopilación de comentarios de usuarios",
+          "jaccard": 0.49,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Funcionalidad Multiples Subtasks",
+          "ai": "Integración de nuevas funcionalidades",
+          "jaccard": 0.49,
+          "real_assignees": [
+            3,
+            10
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "En la view principal agregar la opción de filtrar por tags",
+          "ai": "Implementación de mejoras en la interfaz",
+          "jaccard": 0.43,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Agregar sección de Links and Files",
+          "ai": "Documentación de cambios",
+          "jaccard": 0.4,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Gestión de estados de una tarea",
+          "ai": "Optimización del rendimiento",
+          "jaccard": 0.39,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Agregar un check de \"visto\" en cada notificación no leída",
+          "ai": "Pruebas de usuario",
+          "jaccard": 0.36,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 3
+        }
+      ],
+      "member_names": {
+        "18": "Cesar Velasquez",
+        "5": "Juan Florez",
+        "1": "Marcela Mazo",
+        "2": "Santiago Gutierrez",
+        "3": "Santiago Trujillo",
+        "17": "Adrianyela Paola Villalobos",
+        "16": "David Enciso",
+        "4": "Edgar Martinez",
+        "11": "Fabiola Nava",
+        "15": "Jesus Andres Bocanegra Mejia",
+        "9": "Luis Quintero",
+        "8": "Maria Paz Hernandez Barrera",
+        "10": "Sebastian Sosa Serrano"
+      }
+    },
+    {
+      "project_id": 198,
+      "mode": "none",
+      "real": [
+        {
+          "title": "Funcionalidad de \"Like\" o similar en los comentarios",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Inicialización de datos de subtareas a partir de la tarea principal",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Separar las tareas completamente finalizadas en el view de Trabajo",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Funcionalidad Multiples Subtasks",
+          "assignees": [
+            3,
+            10
+          ]
+        },
+        {
+          "title": "Agregar un check de \"visto\" en cada notificación no leída",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "En view de trabajo mostrar las tareas que \"estoy siguiendo\" en una sección colapsable",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Translations: Manejo idioma Inglés y Español",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Agregar sección de Links and Files",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Los adjuntos tipo pdf e imagenes deben poder previsualizarse (o abrir en new tab) sin necesidad de descargar",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Gestión de estados de una tarea",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Agregar \"loading\" component",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "En los comentarios de las tareas detectar cuando existe una url en el texto y transformaro para que se comporte como un link",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "En la columna de Creación, permitir colapsar/expandir las subtasks dentro de su task principal",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "Si una task no tiene End Date pero tiene subtasks, establecer automaticamente el End Date más lejano entre los definidos en sus subtasks",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "En Timeline incluir un check filtro para no mostrar tareas ya completadas",
+          "assignees": [
+            3
+          ]
+        },
+        {
+          "title": "En la view principal agregar la opción de filtrar por tags",
+          "assignees": [
+            3
+          ]
+        }
+      ],
+      "proposal": {
+        "project": {
+          "title": "Mejoras al Deck",
+          "description": "Implementar mejoras al Deck basadas en comentarios de usuarios."
+        },
+        "tasks": [
+          {
+            "id": "T1",
+            "title": "Recopilación de comentarios de usuarios",
+            "description": "Recolectar y organizar comentarios de usuarios sobre el Deck.",
+            "suggested_assignee_id": 17,
+            "assignee_reasoning": "\"Asistente Administrativa\" ha colaborado en tareas de recopilación de datos.",
+            "estimated_hours": 10.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": []
+          },
+          {
+            "id": "T2",
+            "title": "Análisis de comentarios y definición de mejoras",
+            "description": "Analizar comentarios y definir mejoras a implementar en el Deck.",
+            "suggested_assignee_id": 5,
+            "assignee_reasoning": "\"Director de Tecnología\" tiene experiencia en análisis y definición de mejoras tecnológicas.",
+            "estimated_hours": 12.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T1"
+            ]
+          },
+          {
+            "id": "T3",
+            "title": "Desarrollo de nuevas funcionalidades",
+            "description": "Implementar las funcionalidades definidas en el análisis.",
+            "suggested_assignee_id": 18,
+            "assignee_reasoning": "\"Ingeniero Desarrollador Full Stack\" ha trabajado en desarrollos previos del Deck.",
+            "estimated_hours": 30.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T2"
+            ]
+          },
+          {
+            "id": "T4",
+            "title": "Testing interno de mejoras",
+            "description": "Realizar pruebas internas de las nuevas funcionalidades del Deck.",
+            "suggested_assignee_id": 3,
+            "assignee_reasoning": "\"Ingeniero Desarrollador Full Stack\" tiene experiencia en pruebas internas de software.",
+            "estimated_hours": 15.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T3"
+            ]
+          },
+          {
+            "id": "T5",
+            "title": "Testing externo con usuarios",
+            "description": "Coordinar y ejecutar pruebas con usuarios para validar mejoras.",
+            "suggested_assignee_id": 16,
+            "assignee_reasoning": "\"Portfolio Manager\" ha coordinado pruebas externas en proyectos anteriores.",
+            "estimated_hours": 20.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T4"
+            ]
+          },
+          {
+            "id": "T6",
+            "title": "Documentación de nuevas funcionalidades",
+            "description": "Crear documentación detallada de las nuevas funcionalidades del Deck.",
+            "suggested_assignee_id": 1,
+            "assignee_reasoning": "\"Ingeniero Desarrollador Full Stack\" ha documentado funcionalidades en proyectos previos.",
+            "estimated_hours": 10.0,
+            "confidence": "media",
+            "reference_project_id": null,
+            "depends_on": [
+              "T5"
+            ]
+          }
+        ],
+        "assumptions": [
+          "Los comentarios de los usuarios estarán disponibles y accesibles para su análisis.",
+          "Las mejoras a implementar serán técnicamente viables dentro del tiempo estimado."
+        ],
+        "risks": [
+          "Los comentarios de los usuarios pueden ser insuficientes o poco claros.",
+          "Las nuevas funcionalidades pueden requerir más tiempo de desarrollo del estimado."
+        ]
+      },
+      "warnings": [
+        "T1: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T2: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T3: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T3: confidence rebajada a media por falta de evidencia verificable",
+        "T4: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T4: justificación genérica ('\"Ingeniero Desarrollador Full Stack\" tiene experiencia en pr…')",
+        "T5: la justificación cita algo que no existe en el contexto (evidencia no verificable)",
+        "T6: la justificación cita algo que no existe en el contexto (evidencia no verificable)"
+      ],
+      "pairs": [
+        {
+          "real": "Funcionalidad Multiples Subtasks",
+          "ai": "Desarrollo de nuevas funcionalidades",
+          "jaccard": 0.5,
+          "real_assignees": [
+            3,
+            10
+          ],
+          "ai_assignee": 18
+        },
+        {
+          "real": "Funcionalidad de \"Like\" o similar en los comentarios",
+          "ai": "Recopilación de comentarios de usuarios",
+          "jaccard": 0.49,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 17
+        },
+        {
+          "real": "Agregar sección de Links and Files",
+          "ai": "Documentación de nuevas funcionalidades",
+          "jaccard": 0.45,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 1
+        },
+        {
+          "real": "En los comentarios de las tareas detectar cuando existe una url en el texto y transformaro para que se comporte como un link",
+          "ai": "Análisis de comentarios y definición de mejoras",
+          "jaccard": 0.41,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 5
+        },
+        {
+          "real": "Inicialización de datos de subtareas a partir de la tarea principal",
+          "ai": "Testing interno de mejoras",
+          "jaccard": 0.37,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 3
+        },
+        {
+          "real": "Gestión de estados de una tarea",
+          "ai": "Testing externo con usuarios",
+          "jaccard": 0.33,
+          "real_assignees": [
+            3
+          ],
+          "ai_assignee": 16
+        }
+      ],
+      "member_names": {
+        "18": "Cesar Velasquez",
+        "5": "Juan Florez",
+        "1": "Marcela Mazo",
+        "2": "Santiago Gutierrez",
+        "3": "Santiago Trujillo",
+        "17": "Adrianyela Paola Villalobos",
+        "16": "David Enciso",
+        "4": "Edgar Martinez",
+        "11": "Fabiola Nava",
+        "15": "Jesus Andres Bocanegra Mejia",
+        "9": "Luis Quintero",
+        "8": "Maria Paz Hernandez Barrera",
+        "10": "Sebastian Sosa Serrano"
+      }
+    }
+  ]
+}

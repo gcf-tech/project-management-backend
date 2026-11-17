@@ -1,0 +1,7 @@
+mode,project,project_id,assignee_pair_accuracy,assignee_pool_precision,completion_tokens,dominant_match,evidence_warnings,model,n_ai,n_real,phase_warnings,prompt_tokens,size_ratio,title_coverage,title_similarity,unassigned_ai
+full,Proyecto Cryptox,705,,,809,,0,gpt-4o-2024-08-06,8,8,0,4760,1.0,0.0,0.03,0
+none,Proyecto Cryptox,705,,,765,,0,gpt-4o-2024-08-06,7,8,2,2204,0.88,0.12,0.1,1
+full,Selligents,536,,0.0,806,0,2,gpt-4o-2024-08-06,6,8,1,4047,0.75,0.0,0.0,0
+none,Selligents,536,,0.0,541,0,0,gpt-4o-2024-08-06,7,8,2,1421,0.88,0.0,0.0,0
+full,Plataforma modular para brokers,378,,0.0,661,0,0,gpt-4o-2024-08-06,6,8,1,4109,0.75,0.0,0.0,1
+none,Plataforma modular para brokers,378,,0.14,695,0,0,gpt-4o-2024-08-06,7,8,2,1443,0.88,0.0,0.0,0

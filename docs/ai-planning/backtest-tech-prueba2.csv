@@ -1,0 +1,7 @@
+mode,project,project_id,assignee_pair_accuracy,assignee_pool_precision,completion_tokens,dominant_match,evidence_warnings,lexical_coverage,model,n_ai,n_real,phase_warnings,prompt_tokens,size_ratio,title_coverage,title_method,title_similarity,unassigned_ai
+full,Plataforma modular para brokers,378,,0.0,499,0,0,0.0,gpt-4o-2024-08-06,5,8,1,4646,0.62,0.0,embeddings,0.22,0
+none,Plataforma modular para brokers,378,,0.33,741,1,4,0.0,gpt-4o-2024-08-06,6,8,1,1529,0.75,0.0,embeddings,0.24,0
+full,Herramienta para Flujo Comercial (SIC),209,0.0,0.67,585,1,2,0.0,gpt-4o-2024-08-06,6,4,1,4771,1.5,0.25,embeddings,0.44,0
+none,Herramienta para Flujo Comercial (SIC),209,0.0,0.5,531,0,7,0.0,gpt-4o-2024-08-06,6,4,1,1541,1.5,0.25,embeddings,0.48,0
+full,Modificaciones y mejoras al Deck,198,,1.0,529,1,1,0.0,gpt-4o-2024-08-06,6,16,1,4464,0.38,0.0,embeddings,0.16,0
+none,Modificaciones y mejoras al Deck,198,,0.17,714,0,7,0.0,gpt-4o-2024-08-06,6,16,0,1520,0.38,0.0,embeddings,0.16,0

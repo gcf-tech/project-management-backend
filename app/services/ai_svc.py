@@ -13,13 +13,15 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
 from app.core import config
 
 _OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
+_OPENAI_EMBED_ENDPOINT = "https://api.openai.com/v1/embeddings"
+EMBED_MODEL = "text-embedding-3-small"
 
 
 class AIError(Exception):
@@ -139,3 +141,20 @@ async def complete_json(system_prompt: str, user_prompt: str, *,
     if config.AI_PROVIDER == "openai":
         return await _openai_chat(system_prompt, user_prompt, temperature=temp, max_tokens=max_tokens)
     raise AIError(f"Proveedor de IA no soportado: {config.AI_PROVIDER}")
+
+
+async def embed(texts: List[str]) -> List[List[float]]:
+    """Embeddings de una lista de textos (OpenAI). Usado por el backtest para
+    comparar títulos de subtareas por similitud semántica, no por palabras exactas."""
+    if not config.AI_ENABLED:
+        raise AIError("El servicio de IA no está configurado (OPENAI_API_KEY vacía)")
+    if not texts:
+        return []
+    headers = {"Authorization": f"Bearer {config.OPENAI_API_KEY}", "Content-Type": "application/json"}
+    body = {"model": EMBED_MODEL, "input": [t[:2000] for t in texts]}
+    async with httpx.AsyncClient(timeout=config.AI_TIMEOUT_S) as client:
+        r = await client.post(_OPENAI_EMBED_ENDPOINT, headers=headers, json=body)
+    if r.status_code != 200:
+        raise AIError(f"OpenAI embeddings {r.status_code}: {r.text[:200]}")
+    data = sorted(r.json()["data"], key=lambda d: d["index"])
+    return [d["embedding"] for d in data]
